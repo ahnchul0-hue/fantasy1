@@ -1,0 +1,392 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "사주 상담 플랫폼 API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://api.saju.app/v1", "description": "Production" },
+    { "url": "http://localhost:8080/v1", "description": "Local" }
+  ],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "summary": "소셜 로그인",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["provider", "token"],
+                "properties": {
+                  "provider": { "type": "string", "enum": ["kakao", "apple", "google"] },
+                  "token": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JWT 발급",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "summary": "토큰 갱신",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["refresh_token"],
+                "properties": {
+                  "refresh_token": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "새 토큰", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } }
+        }
+      }
+    },
+    "/auth/delete-account": {
+      "delete": {
+        "summary": "계정 삭제 (앱스토어 필수)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "204": { "description": "삭제 완료" } }
+      }
+    },
+    "/saju/card": {
+      "post": {
+        "summary": "무료 사주 카드 생성",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BirthInput" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SajuCard" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/saju/card/{id}": {
+      "get": {
+        "summary": "사주 카드 조회 (공유 페이지용)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SajuCard" }
+              }
+            }
+          },
+          "404": { "description": "카드를 찾을 수 없음" }
+        }
+      }
+    },
+    "/saju/consultation": {
+      "post": {
+        "summary": "유료 AI 사주 상담 시작",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ConsultationRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Consultation" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/saju/consultation/{id}/status": {
+      "get": {
+        "summary": "상담 상태 폴링",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Consultation" }
+              }
+            }
+          },
+          "404": { "description": "상담을 찾을 수 없음" }
+        }
+      }
+    },
+    "/saju/consultation/{id}/chat": {
+      "post": {
+        "summary": "AI 채팅 메시지 전송",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message"],
+                "properties": {
+                  "message": { "type": "string", "maxLength": 500 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ChatMessage" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/saju/compatibility": {
+      "post": {
+        "summary": "궁합 미리보기 (무료)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["person1", "person2"],
+                "properties": {
+                  "person1": { "$ref": "#/components/schemas/BirthInput" },
+                  "person2": { "$ref": "#/components/schemas/BirthInput" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompatibilityPreview" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fortune/daily": {
+      "get": {
+        "summary": "오늘의 운세 (일주별 사전 생성, 캐시)",
+        "description": "인증 없이 호출 시 일반 운세, 인증 시 일주별 맞춤 운세 반환",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DailyFortune" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile": {
+      "get": {
+        "summary": "평생 사주 프로필",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SajuProfile" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payment/verify": {
+      "post": {
+        "summary": "IAP 영수증 검증 (RevenueCat webhook)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PaymentVerification" }
+              }
+          }
+        },
+        "responses": { "200": { "description": "검증 완료" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "BirthInput": {
+        "type": "object",
+        "required": ["year", "month", "day", "calendar_type", "gender"],
+        "properties": {
+          "year": { "type": "integer", "minimum": 1900, "maximum": 2100 },
+          "month": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "day": { "type": "integer", "minimum": 1, "maximum": 31 },
+          "calendar_type": { "type": "string", "enum": ["solar", "lunar"] },
+          "is_leap_month": { "type": "boolean", "default": false },
+          "birth_hour": { "type": "string", "enum": ["ja", "chuk", "in", "myo", "jin", "sa", "o", "mi", "sin", "yu", "sul", "hae", "unknown"], "description": "12시진 또는 unknown" },
+          "gender": { "type": "string", "enum": ["male", "female"] }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "expires_in": { "type": "integer" },
+          "user": { "$ref": "#/components/schemas/User" }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "provider": { "type": "string" },
+          "nickname": { "type": "string" },
+          "has_profile": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SajuCard": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "ilju_name": { "type": "string", "description": "일주 한글명 e.g. 갑목" },
+          "ilju_hanja": { "type": "string", "description": "일주 한자 e.g. 甲木" },
+          "keywords": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+          "lucky_element": { "type": "string" },
+          "image_url": { "type": "string", "format": "uri" },
+          "share_url": { "type": "string", "format": "uri" },
+          "cached": { "type": "boolean" }
+        }
+      },
+      "ConsultationRequest": {
+        "type": "object",
+        "required": ["birth_input", "receipt_id"],
+        "properties": {
+          "birth_input": { "$ref": "#/components/schemas/BirthInput" },
+          "receipt_id": { "type": "string", "description": "RevenueCat receipt ID" }
+        }
+      },
+      "Consultation": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["generating", "ready", "expired", "failed"] },
+          "result_images": { "type": "array", "items": { "type": "string", "format": "uri" } },
+          "analysis_summary": { "type": "string" },
+          "chat_turns_remaining": { "type": "integer" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "checkpoint_status": { "type": "string", "enum": ["none", "analysis_done", "images_done", "complete"] }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "role": { "type": "string", "enum": ["user", "assistant"] },
+          "content": { "type": "string" },
+          "turns_remaining": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CompatibilityPreview": {
+        "type": "object",
+        "properties": {
+          "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "summary": { "type": "string" },
+          "person1_element": { "type": "string" },
+          "person2_element": { "type": "string" }
+        }
+      },
+      "DailyFortune": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "format": "date" },
+          "ilju": { "type": "string" },
+          "fortune_text": { "type": "string" },
+          "lucky_color": { "type": "string" },
+          "lucky_number": { "type": "integer" },
+          "overall_score": { "type": "integer", "minimum": 1, "maximum": 5 }
+        }
+      },
+      "SajuProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "birth_input": { "$ref": "#/components/schemas/BirthInput" },
+          "four_pillars": {
+            "type": "object",
+            "properties": {
+              "year": { "$ref": "#/components/schemas/Pillar" },
+              "month": { "$ref": "#/components/schemas/Pillar" },
+              "day": { "$ref": "#/components/schemas/Pillar" },
+              "hour": { "$ref": "#/components/schemas/Pillar" }
+            }
+          },
+          "oheng_balance": {
+            "type": "object",
+            "properties": {
+              "wood": { "type": "number" },
+              "fire": { "type": "number" },
+              "earth": { "type": "number" },
+              "metal": { "type": "number" },
+              "water": { "type": "number" }
+            }
+          }
+        }
+      },
+      "Pillar": {
+        "type": "object",
+        "properties": {
+          "heavenly_stem": { "type": "string" },
+          "earthly_branch": { "type": "string" },
+          "heavenly_stem_hanja": { "type": "string" },
+          "earthly_branch_hanja": { "type": "string" }
+        }
+      },
+      "PaymentVerification": {
+        "type": "object",
+        "required": ["receipt_id", "product_id", "platform"],
+        "properties": {
+          "receipt_id": { "type": "string" },
+          "product_id": { "type": "string", "enum": ["saju_consultation_15000", "compatibility_consultation_12000"] },
+          "platform": { "type": "string", "enum": ["ios", "android"] }
+        }
+      }
+    }
+  }
+}

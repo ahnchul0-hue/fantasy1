@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: "Pretendard Variable", "Pretendard", -apple-system,
+      BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
+    color: #2d2d2d;
+    background-color: #f5f0eb;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100dvh;
+  }
+
+  ::selection {
+    background-color: rgba(212, 165, 116, 0.3);
+    color: #1a1a2e;
+  }
+}
+
+@layer components {
+  .cta-primary {
+    @apply inline-flex items-center justify-center h-[52px] px-8 bg-accent text-primary
+      font-semibold text-body rounded-button transition-all duration-300
+      hover:brightness-110 hover:shadow-lg hover:shadow-accent/20
+      active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .cta-secondary {
+    @apply inline-flex items-center justify-center h-[44px] px-6 bg-transparent
+      border border-accent text-accent font-semibold rounded-button
+      transition-all duration-300 hover:bg-accent/10 active:scale-[0.98];
+  }
+
+  .input-field {
+    @apply h-12 w-full border border-divider rounded-input px-4 bg-white
+      text-on-surface placeholder:text-placeholder focus:outline-none
+      focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors;
+  }
+
+  .section-container {
+    @apply max-w-4xl mx-auto px-md sm:px-lg;
+  }
+
+  .card-surface {
+    @apply bg-white rounded-card shadow-sm border border-divider/50;
+  }
+}
+
+/* Smooth scroll for anchor links */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #e0d8cf;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #d4a574;
+}

@@ -1,0 +1,40 @@
+app = "saju-backend"
+primary_region = "nrt"
+# Tokyo (nrt) - closest to Korea for lowest latency
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  RUST_LOG = "info,saju_backend=debug"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "15s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[metrics]
+  port = 9091
+  path = "/metrics"
