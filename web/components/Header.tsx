@@ -43,7 +43,8 @@ export default function Header() {
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="sm:hidden p-2 text-primary"
-          aria-label="메뉴 열기"
+          aria-label={mobileMenuOpen ? "메뉴 닫기" : "메뉴 열기"}
+          aria-expanded={mobileMenuOpen}
         >
           <svg
             width="24"

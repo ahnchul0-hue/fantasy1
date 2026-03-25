@@ -6,6 +6,17 @@ import type { SajuCard } from "@/lib/api";
 import { ELEMENT_COLORS } from "@/lib/constants";
 import AppDownloadBanner from "./AppDownloadBanner";
 
+const ALLOWED_IMAGE_HOSTS = ["cdn.saju.app", "api.saju.app"];
+
+function isSafeImageUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return ALLOWED_IMAGE_HOSTS.includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
 interface SajuCardResultProps {
   card: SajuCard;
 }
@@ -36,9 +47,13 @@ export default function SajuCardResult({ card }: SajuCardResultProps) {
         // User cancelled share
       }
     } else {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        window.prompt("링크를 복사해주세요:", shareUrl);
+      }
     }
   };
 
@@ -53,7 +68,7 @@ export default function SajuCardResult({ card }: SajuCardResultProps) {
       >
         {/* Card image area */}
         <div className="relative aspect-[3/4] bg-gradient-to-b from-primary/5 to-primary/10 flex items-center justify-center overflow-hidden">
-          {card.image_url ? (
+          {card.image_url && isSafeImageUrl(card.image_url) ? (
             <Image
               src={card.image_url}
               alt={`${card.ilju_name} 사주 카드`}
@@ -99,9 +114,9 @@ export default function SajuCardResult({ card }: SajuCardResultProps) {
 
           {/* Keywords */}
           <div className="flex flex-wrap justify-center gap-2">
-            {card.keywords.map((keyword, i) => (
+            {card.keywords.map((keyword) => (
               <span
-                key={i}
+                key={keyword}
                 className="px-3 py-1.5 rounded-full text-sm font-medium"
                 style={{
                   backgroundColor: `${elementColor}15`,

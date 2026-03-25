@@ -34,8 +34,16 @@ export default function BirthInputForm({
     if (!month || isNaN(m) || m < 1 || m > 12) {
       newErrors.month = "올바른 월을 입력해주세요 (1~12)";
     }
-    if (!day || isNaN(d) || d < 1 || d > 31) {
-      newErrors.day = "올바른 일을 입력해주세요 (1~31)";
+
+    const maxDay =
+      !isNaN(y) && !isNaN(m) && m >= 1 && m <= 12
+        ? new Date(y, m, 0).getDate()
+        : 31;
+    if (!day || isNaN(d) || d < 1 || d > maxDay) {
+      newErrors.day =
+        maxDay < 31
+          ? `${m}월은 최대 ${maxDay}일까지 입력 가능합니다`
+          : "올바른 일을 입력해주세요 (1~31)";
     }
     if (!gender) {
       newErrors.gender = "성별을 선택해주세요";
@@ -94,13 +102,15 @@ export default function BirthInputForm({
       </div>
 
       {/* Birth date */}
-      <div>
-        <label className="block text-sm font-medium text-on-surface mb-2">
+      <fieldset>
+        <legend className="block text-sm font-medium text-on-surface mb-2">
           생년월일
-        </label>
+        </legend>
         <div className="grid grid-cols-3 gap-3">
           <div>
+            <label htmlFor="birth-year" className="sr-only">년</label>
             <input
+              id="birth-year"
               type="number"
               placeholder="년 (YYYY)"
               value={year}
@@ -109,13 +119,17 @@ export default function BirthInputForm({
               min={1900}
               max={2100}
               inputMode="numeric"
+              aria-describedby={errors.year ? "error-year" : undefined}
+              aria-invalid={!!errors.year}
             />
             {errors.year && (
-              <p className="text-error text-xs mt-1">{errors.year}</p>
+              <p id="error-year" className="text-error text-xs mt-1" role="alert">{errors.year}</p>
             )}
           </div>
           <div>
+            <label htmlFor="birth-month" className="sr-only">월</label>
             <input
+              id="birth-month"
               type="number"
               placeholder="월"
               value={month}
@@ -124,13 +138,17 @@ export default function BirthInputForm({
               min={1}
               max={12}
               inputMode="numeric"
+              aria-describedby={errors.month ? "error-month" : undefined}
+              aria-invalid={!!errors.month}
             />
             {errors.month && (
-              <p className="text-error text-xs mt-1">{errors.month}</p>
+              <p id="error-month" className="text-error text-xs mt-1" role="alert">{errors.month}</p>
             )}
           </div>
           <div>
+            <label htmlFor="birth-day" className="sr-only">일</label>
             <input
+              id="birth-day"
               type="number"
               placeholder="일"
               value={day}
@@ -139,13 +157,15 @@ export default function BirthInputForm({
               min={1}
               max={31}
               inputMode="numeric"
+              aria-describedby={errors.day ? "error-day" : undefined}
+              aria-invalid={!!errors.day}
             />
             {errors.day && (
-              <p className="text-error text-xs mt-1">{errors.day}</p>
+              <p id="error-day" className="text-error text-xs mt-1" role="alert">{errors.day}</p>
             )}
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {/* Leap month (only for lunar) */}
       {calendarType === "lunar" && (
@@ -162,10 +182,11 @@ export default function BirthInputForm({
 
       {/* Birth hour */}
       <div>
-        <label className="block text-sm font-medium text-on-surface mb-2">
+        <label htmlFor="birth-hour" className="block text-sm font-medium text-on-surface mb-2">
           태어난 시간
         </label>
         <select
+          id="birth-hour"
           value={birthHour}
           onChange={(e) =>
             setBirthHour(e.target.value as BirthInput["birth_hour"])
@@ -181,13 +202,15 @@ export default function BirthInputForm({
       </div>
 
       {/* Gender */}
-      <div>
-        <label className="block text-sm font-medium text-on-surface mb-2">
+      <fieldset>
+        <legend className="block text-sm font-medium text-on-surface mb-2">
           성별
-        </label>
-        <div className="flex gap-3">
+        </legend>
+        <div className="flex gap-3" role="radiogroup" aria-label="성별 선택">
           <button
             type="button"
+            role="radio"
+            aria-checked={gender === "male"}
             onClick={() => setGender("male")}
             className={`flex-1 h-12 rounded-button border text-sm font-medium transition-all duration-300 ${
               gender === "male"
@@ -199,6 +222,8 @@ export default function BirthInputForm({
           </button>
           <button
             type="button"
+            role="radio"
+            aria-checked={gender === "female"}
             onClick={() => setGender("female")}
             className={`flex-1 h-12 rounded-button border text-sm font-medium transition-all duration-300 ${
               gender === "female"
@@ -210,9 +235,9 @@ export default function BirthInputForm({
           </button>
         </div>
         {errors.gender && (
-          <p className="text-error text-xs mt-1">{errors.gender}</p>
+          <p id="error-gender" className="text-error text-xs mt-1" role="alert">{errors.gender}</p>
         )}
-      </div>
+      </fieldset>
 
       {/* Submit */}
       <button

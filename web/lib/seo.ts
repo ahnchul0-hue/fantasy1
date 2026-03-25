@@ -82,17 +82,6 @@ export function generateJsonLd(options: {
     base.image = options.image;
   }
 
-  if (options.type === "WebSite") {
-    base.potentialAction = {
-      "@type": "SearchAction",
-      target: {
-        "@type": "EntryPoint",
-        urlTemplate: `${SITE_URL}/card?q={search_term_string}`,
-      },
-      "query-input": "required name=search_term_string",
-    };
-  }
-
   if (options.datePublished) {
     base.datePublished = options.datePublished;
   }
@@ -101,4 +90,20 @@ export function generateJsonLd(options: {
   }
 
   return base;
+}
+
+/** Generate BreadcrumbList JSON-LD */
+export function generateBreadcrumbJsonLd(
+  items: { name: string; url: string }[]
+) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.url,
+    })),
+  };
 }

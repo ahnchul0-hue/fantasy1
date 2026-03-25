@@ -1,4 +1,5 @@
-/** App Store and Play Store links */
+/** App Store and Play Store links
+ * TODO: APP_STORE_URL을 실제 App Store ID로 교체 필요 */
 export const APP_STORE_URL = "https://apps.apple.com/app/saju/id0000000000";
 export const PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=app.saju";

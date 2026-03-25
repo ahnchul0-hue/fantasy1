@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
+              "script-src 'self' 'strict-dynamic' https://www.googletagmanager.com",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
               "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
               "img-src 'self' data: https://cdn.saju.app https://api.saju.app",

@@ -28,15 +28,15 @@ export interface BirthInput {
   gender: "male" | "female";
 }
 
-/** Saju card response */
+/** Saju card response (nullable fields per API contract) */
 export interface SajuCard {
   id: string;
   ilju_name: string;
   ilju_hanja: string;
   keywords: string[];
   lucky_element: string;
-  image_url?: string;
-  share_url?: string;
+  image_url: string | null;
+  share_url: string | null;
   cached: boolean;
 }
 
@@ -99,9 +99,11 @@ class ApiClient {
     return this.request<SajuCard>(`/saju/card/${id}`);
   }
 
-  /** Get daily fortune (pre-generated, cached) */
-  async getDailyFortune(): Promise<DailyFortune> {
-    return this.request<DailyFortune>("/fortune/daily");
+  /** Get daily fortune (requires auth — per API contract, bearerAuth is mandatory) */
+  async getDailyFortune(authToken: string): Promise<DailyFortune> {
+    return this.request<DailyFortune>("/fortune/daily", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
   }
 }
 

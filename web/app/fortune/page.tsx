@@ -1,28 +1,38 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
-import { generateJsonLd } from "@/lib/seo";
+import { generateJsonLd, generateBreadcrumbJsonLd } from "@/lib/seo";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://saju.app";
 
 export const metadata: Metadata = {
-  title: "오늘의 운세 | AI 사주",
+  title: "오늘의 운세",
   description:
-    "AI가 분석하는 오늘의 운세. 60가지 일주별 맞춤 운세와 행운의 색, 행운의 숫자를 확인하세요. 매일 업데이트됩니다.",
+    "오행(五行)으로 보는 오늘의 운세. 목·화·토·금·수 오행별 운세 개요와 조언을 확인하세요. 앱에서 나의 일주별 맞춤 운세도 받아볼 수 있습니다.",
   keywords: [
     "오늘의 운세",
     "무료 운세",
-    "일주 운세",
+    "오행 운세",
     "매일 운세",
     "AI 운세",
     "사주 운세",
+    "2026 운세",
+    "오늘 운세 보기",
   ],
+  alternates: { canonical: `${SITE_URL}/fortune` },
   openGraph: {
     title: "오늘의 운세 | AI 사주",
-    description: "AI가 분석하는 오늘의 운세. 매일 업데이트.",
+    description: "오행(五行)으로 보는 오늘의 운세. 매일 업데이트.",
     url: `${SITE_URL}/fortune`,
     type: "article",
     locale: "ko_KR",
+    images: [{ url: `${SITE_URL}/og-default.png`, width: 1200, height: 630, alt: "오늘의 운세" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "오늘의 운세 | AI 사주",
+    description: "오행(五行)으로 보는 오늘의 운세. 매일 업데이트.",
+    images: [`${SITE_URL}/og-default.png`],
   },
 };
 
@@ -63,24 +73,42 @@ const DAILY_ELEMENTS = [
   },
 ];
 
-const today = new Date();
-const formattedDate = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`;
-
-const fortuneJsonLd = generateJsonLd({
-  type: "Article",
-  name: `${formattedDate} 오늘의 운세`,
-  description: "AI가 분석하는 오늘의 운세. 오행별 운세 개요와 조언.",
-  url: `${SITE_URL}/fortune`,
-  datePublished: today.toISOString(),
-  dateModified: today.toISOString(),
-});
+function getKSTDate() {
+  const now = new Date();
+  const formatted = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+  const iso = now.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  return { formatted, iso };
+}
 
 export default function FortunePage() {
+  const { formatted: formattedDate, iso: isoDate } = getKSTDate();
+
+  const breadcrumbJsonLd = generateBreadcrumbJsonLd([
+    { name: "홈", url: SITE_URL },
+    { name: "오늘의 운세", url: `${SITE_URL}/fortune` },
+  ]);
+
+  const fortuneJsonLd = generateJsonLd({
+    type: "Article",
+    name: `${formattedDate} 오늘의 운세`,
+    description: "AI가 분석하는 오늘의 운세. 오행별 운세 개요와 조언.",
+    url: `${SITE_URL}/fortune`,
+    datePublished: `${isoDate}T00:00:00+09:00`,
+    dateModified: `${isoDate}T00:00:00+09:00`,
+  });
+
   return (
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(fortuneJsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([fortuneJsonLd, breadcrumbJsonLd]),
+        }}
       />
 
       <div className="section-container py-8 sm:py-12">

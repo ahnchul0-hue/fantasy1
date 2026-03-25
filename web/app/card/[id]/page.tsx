@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
@@ -7,6 +8,16 @@ import type { SajuCard } from "@/lib/api";
 
 const API_BASE = process.env.API_URL || "https://api.saju.app/v1";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://saju.app";
+const ALLOWED_IMAGE_HOSTS = ["cdn.saju.app", "api.saju.app"];
+
+function isSafeImageUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return ALLOWED_IMAGE_HOSTS.includes(hostname);
+  } catch {
+    return false;
+  }
+}
 
 async function getCard(id: string): Promise<SajuCard | null> {
   try {
@@ -43,6 +54,8 @@ export async function generateMetadata({
   return {
     title,
     description,
+    robots: { index: false, follow: true },
+    alternates: { canonical: `${SITE_URL}/card/${id}` },
     openGraph: {
       type: "article",
       url: `${SITE_URL}/card/${id}`,
@@ -73,24 +86,7 @@ export default async function SharedCardPage({ params }: PageProps) {
   const card = await getCard(id);
 
   if (!card) {
-    return (
-      <div className="section-container py-20 text-center">
-        <div className="max-w-md mx-auto">
-          <div className="w-16 h-16 bg-primary/10 rounded-full mx-auto flex items-center justify-center mb-4">
-            <span className="font-hanja text-2xl text-primary">?</span>
-          </div>
-          <h1 className="text-title font-bold text-primary mb-2">
-            카드를 찾을 수 없습니다
-          </h1>
-          <p className="text-body text-secondary-text mb-6">
-            요청하신 사주 카드가 존재하지 않거나 만료되었습니다.
-          </p>
-          <Link href="/card" className="cta-primary">
-            나만의 사주 카드 만들기
-          </Link>
-        </div>
-      </div>
-    );
+    notFound();
   }
 
   const elementColor =
@@ -109,12 +105,22 @@ export default async function SharedCardPage({ params }: PageProps) {
     },
   };
 
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "홈", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "사주 카드", item: `${SITE_URL}/card` },
+      { "@type": "ListItem", position: 3, name: card.ilju_name, item: `${SITE_URL}/card/${id}` },
+    ],
+  };
+
   return (
     <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+          __html: JSON.stringify([jsonLd, breadcrumbJsonLd]).replace(/</g, "\\u003c"),
         }}
       />
 
@@ -124,7 +130,7 @@ export default async function SharedCardPage({ params }: PageProps) {
           <div className="card-surface overflow-hidden animate-card-reveal">
             {/* Card image */}
             <div className="relative aspect-[3/4] bg-gradient-to-b from-primary/5 to-primary/10 flex items-center justify-center">
-              {card.image_url ? (
+              {card.image_url && isSafeImageUrl(card.image_url) ? (
                 <Image
                   src={card.image_url}
                   alt={`${card.ilju_name} 사주 카드`}
@@ -169,9 +175,9 @@ export default async function SharedCardPage({ params }: PageProps) {
 
               {/* Keywords */}
               <div className="flex flex-wrap justify-center gap-2">
-                {card.keywords.map((keyword, i) => (
+                {card.keywords.map((keyword) => (
                   <span
-                    key={i}
+                    key={keyword}
                     className="px-3 py-1.5 rounded-full text-sm font-medium"
                     style={{
                       backgroundColor: `${elementColor}15`,
