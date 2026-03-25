@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import '../../shared/models/payment.dart';
 
@@ -20,7 +22,11 @@ class PaymentService {
     if (_initialized) return;
 
     final apiKey = Platform.isIOS ? _iosApiKey : _androidApiKey;
-    if (apiKey.isEmpty) return;
+    if (apiKey.isEmpty) {
+      debugPrint('[PaymentService] WARNING: RevenueCat API key is empty. '
+          'Set REVENUECAT_IOS_KEY or REVENUECAT_ANDROID_KEY via --dart-define.');
+      return;
+    }
 
     final config = PurchasesConfiguration(apiKey);
     if (userId != null) {
@@ -85,8 +91,8 @@ class PaymentService {
         receiptId: transaction.transactionIdentifier,
         platform: Platform.isIOS ? 'ios' : 'android',
       );
-    } on PurchasesErrorCode catch (e) {
-      if (e == PurchasesErrorCode.purchaseCancelledError) {
+    } on PlatformException catch (e) {
+      if (e.code == '1' /* userCancelled */) {
         return const PurchaseResult(
           success: false,
           cancelled: true,

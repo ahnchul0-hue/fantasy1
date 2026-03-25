@@ -78,10 +78,12 @@ class HomeScreen extends ConsumerWidget {
             const Divider(),
             const SizedBox(height: AppSpacing.md),
 
-            // Social proof
+            // Social proof — 실제 데이터 연동 전 placeholder
             Text(
-              '누적 상담 0건',
-              style: AppTypography.caption,
+              'AI 기반 사주 분석 서비스',
+              style: AppTypography.caption.copyWith(
+                color: AppColors.secondaryText,
+              ),
             ),
           ],
         ),

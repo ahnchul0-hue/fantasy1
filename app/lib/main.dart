@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
@@ -8,6 +9,9 @@ import 'features/payment/payment_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Firebase 초기화
+  await Firebase.initializeApp();
 
   // Lock to portrait orientation
   await SystemChrome.setPreferredOrientations([
@@ -22,13 +26,16 @@ void main() async {
     statusBarBrightness: Brightness.light,
   ));
 
-  // TODO: Initialize Firebase
-  // await Firebase.initializeApp();
-
   // RevenueCat 초기화
-  await PaymentService().initialize();
+  final paymentService = PaymentService();
+  await paymentService.initialize();
 
-  runApp(const ProviderScope(child: SajuApp()));
+  runApp(ProviderScope(
+    overrides: [
+      paymentServiceProvider.overrideWithValue(paymentService),
+    ],
+    child: const SajuApp(),
+  ));
 }
 
 class SajuApp extends ConsumerWidget {

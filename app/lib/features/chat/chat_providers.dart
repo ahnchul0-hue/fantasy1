@@ -2,119 +2,86 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
 import '../../shared/models/models.dart';
 
-/// Chat messages provider for a specific consultation
+/// Chat messages for a consultation — loaded from server
 final chatMessagesProvider = StateNotifierProvider.autoDispose
-    .family<ChatNotifier, ChatState, String>((ref, consultationId) {
-  return ChatNotifier(
-    apiClient: ref.watch(apiClientProvider),
-    consultationId: consultationId,
-  );
-});
+    .family<ChatMessagesNotifier, AsyncValue<List<ChatMessage>>, String>(
+  (ref, consultationId) {
+    final apiClient = ref.watch(apiClientProvider);
+    return ChatMessagesNotifier(
+      apiClient: apiClient,
+      consultationId: consultationId,
+    );
+  },
+);
 
-class ChatState {
-  final List<ChatMessage> messages;
-  final int turnsRemaining;
-  final bool isLoading;
-  final String? error;
-
-  const ChatState({
-    this.messages = const [],
-    this.turnsRemaining = 50,
-    this.isLoading = false,
-    this.error,
-  });
-
-  ChatState copyWith({
-    List<ChatMessage>? messages,
-    int? turnsRemaining,
-    bool? isLoading,
-    String? error,
-  }) =>
-      ChatState(
-        messages: messages ?? this.messages,
-        turnsRemaining: turnsRemaining ?? this.turnsRemaining,
-        isLoading: isLoading ?? this.isLoading,
-        error: error,
-      );
-
-  /// Turn warning ladder
-  String? get turnWarning {
-    if (turnsRemaining <= 0) return '세션이 만료되었습니다';
-    if (turnsRemaining == 1) return '마지막 턴입니다';
-    if (turnsRemaining <= 5) return '남은 턴: $turnsRemaining';
-    if (turnsRemaining <= 10) return '남은 턴: $turnsRemaining';
-    return null;
-  }
-
-  TurnWarningLevel get warningLevel {
-    if (turnsRemaining <= 0) return TurnWarningLevel.expired;
-    if (turnsRemaining == 1) return TurnWarningLevel.last;
-    if (turnsRemaining <= 5) return TurnWarningLevel.critical;
-    if (turnsRemaining <= 10) return TurnWarningLevel.warning;
-    return TurnWarningLevel.normal;
-  }
-}
-
-enum TurnWarningLevel { normal, warning, critical, last, expired }
-
-class ChatNotifier extends StateNotifier<ChatState> {
+class ChatMessagesNotifier
+    extends StateNotifier<AsyncValue<List<ChatMessage>>> {
   final ApiClient _apiClient;
   final String consultationId;
 
-  ChatNotifier({
+  /// 최근 전송 에러 (null이면 에러 없음). UI에서 스낵바로 표시 용도.
+  Object? _lastSendError;
+  Object? get lastSendError => _lastSendError;
+
+  /// 에러 확인 후 클리어
+  void clearSendError() => _lastSendError = null;
+
+  ChatMessagesNotifier({
     required ApiClient apiClient,
     required this.consultationId,
   })  : _apiClient = apiClient,
-        super(const ChatState()) {
-    _addInitialMessage();
+        super(const AsyncValue.loading()) {
+    _loadMessages();
   }
 
-  void _addInitialMessage() {
-    state = state.copyWith(
-      messages: [
-        ChatMessage(
-          id: 'initial',
-          role: ChatRole.assistant,
-          content: '무엇이 궁금하신지요?',
-          createdAt: DateTime.now(),
-        ),
-      ],
-    );
+  Future<void> _loadMessages() async {
+    try {
+      final messages =
+          await _apiClient.getConsultationMessages(consultationId);
+      state = AsyncValue.data(messages);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
   }
 
-  Future<void> sendMessage(String text) async {
-    if (text.trim().isEmpty || state.turnsRemaining <= 0) return;
+  Future<void> sendMessage(String content) async {
+    if (content.trim().isEmpty) return;
 
-    // Add user message immediately
-    final userMsg = ChatMessage(
-      id: 'user_${DateTime.now().millisecondsSinceEpoch}',
+    final currentMessages = state.valueOrNull ?? [];
+    // Optimistic update — add user message immediately
+    final userMessage = ChatMessage(
+      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
       role: ChatRole.user,
-      content: text.trim(),
+      content: content.trim(),
       createdAt: DateTime.now(),
     );
-
-    state = state.copyWith(
-      messages: [...state.messages, userMsg],
-      isLoading: true,
-      error: null,
-    );
+    state = AsyncValue.data([...currentMessages, userMessage]);
 
     try {
       final response = await _apiClient.sendChatMessage(
         consultationId,
-        {'message': text.trim()},
+        {'message': content.trim()},
       );
-
-      state = state.copyWith(
-        messages: [...state.messages, response],
-        turnsRemaining: response.turnsRemaining ?? state.turnsRemaining - 1,
-        isLoading: false,
-      );
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: '잠시 후 다시 시도해주세요',
-      );
+      // Replace temp message with server response (contains AI reply)
+      final updated =
+          currentMessages.where((m) => m.id != userMessage.id).toList();
+      // Add the confirmed user message and AI reply
+      updated.add(response);
+      // Reload full list to stay in sync
+      await _loadMessages();
+    } catch (e, st) {
+      // Revert optimistic update — 메시지 목록은 복원하되 에러도 함께 표시
+      // state를 error로 바꾸면 전체 채팅 UI가 사라지므로, 메시지는 유지하고
+      // 마지막 메시지에 에러 표시를 위해 sendError를 별도 상태로 노출
+      state = AsyncValue.data(currentMessages);
+      _lastSendError = e;
     }
   }
 }
+
+/// Consultation session info (for expiry timer, turn count, etc.)
+final consultationSessionProvider = FutureProvider.autoDispose
+    .family<Consultation?, String>((ref, consultationId) async {
+  final apiClient = ref.watch(apiClientProvider);
+  return await apiClient.getConsultation(consultationId);
+});

@@ -185,8 +185,7 @@ class _BirthInputScreenState extends ConsumerState<BirthInputScreen> {
         onDateTimeChanged: (date) {
           setState(() {
             _selectedDate = date;
-            _dateError = null;
-            // TODO: Lunar date validation
+            _dateError = _validateDate(date);
           });
         },
       ),
@@ -222,7 +221,33 @@ class _BirthInputScreenState extends ConsumerState<BirthInputScreen> {
     );
   }
 
+  /// 날짜 유효성 검사
+  String? _validateDate(DateTime date) {
+    final currentYear = DateTime.now().year;
+    if (date.year < 1920 || date.year > currentYear) {
+      return '1920년부터 ${currentYear}년까지 입력 가능합니다';
+    }
+    return null;
+  }
+
+  /// 윤달 유효성 검사 — 음력이 아닌데 윤달 선택 시 에러
+  String? _validateLeapMonth() {
+    if (_isLeapMonth && _calendarType != CalendarType.lunar) {
+      return '윤달은 음력에서만 선택할 수 있습니다';
+    }
+    return null;
+  }
+
   void _onSubmit() {
+    // 제출 시 전체 유효성 검사
+    final dateValidation = _validateDate(_selectedDate);
+    final leapValidation = _validateLeapMonth();
+    final error = dateValidation ?? leapValidation;
+    if (error != null) {
+      setState(() => _dateError = error);
+      return;
+    }
+
     final input = BirthInput(
       year: _selectedDate.year,
       month: _selectedDate.month,

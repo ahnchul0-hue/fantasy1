@@ -25,3 +25,9 @@ class SajuCardNotifier extends StateNotifier<AsyncValue<SajuCard?>> {
     }
   }
 }
+
+/// Provider to fetch an existing saju card by ID
+final sajuCardByIdProvider = FutureProvider.autoDispose.family<SajuCard?, String>((ref, id) async {
+  final apiClient = ref.watch(apiClientProvider);
+  return await apiClient.getSajuCard(id);
+});

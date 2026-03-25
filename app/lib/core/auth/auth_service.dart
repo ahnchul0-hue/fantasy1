@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../shared/models/user.dart';
@@ -30,29 +32,39 @@ class AuthService {
   }
 
   Future<void> saveUser(AppUser user) async {
-    // Store as simple string for quick access
     await _storage.write(
       key: _userKey,
-      value: '${user.id}|${user.provider}|${user.nickname ?? ''}|${user.hasProfile}|${user.createdAt.toIso8601String()}',
+      value: jsonEncode({
+        'id': user.id,
+        'provider': user.provider,
+        'nickname': user.nickname,
+        'hasProfile': user.hasProfile,
+        'createdAt': user.createdAt.toIso8601String(),
+      }),
     );
   }
 
   Future<AppUser?> getUser() async {
     final raw = await _storage.read(key: _userKey);
     if (raw == null) return null;
-    final parts = raw.split('|');
-    if (parts.length < 5) return null;
-    return AppUser(
-      id: parts[0],
-      provider: parts[1],
-      nickname: parts[2].isEmpty ? null : parts[2],
-      hasProfile: parts[3] == 'true',
-      createdAt: DateTime.parse(parts[4]),
-    );
+    try {
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      return AppUser(
+        id: json['id'] as String,
+        provider: json['provider'] as String,
+        nickname: json['nickname'] as String?,
+        hasProfile: json['hasProfile'] as bool? ?? false,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> clearTokens() async {
-    await _storage.deleteAll();
+    await _storage.delete(key: _accessTokenKey);
+    await _storage.delete(key: _refreshTokenKey);
+    await _storage.delete(key: _userKey);
   }
 
   Future<bool> get isLoggedIn async {

@@ -5,15 +5,16 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/api/api_client.dart';
 import '../../shared/models/consultation.dart';
 import '../../shared/widgets/widgets.dart';
 
-/// Demo history data provider
-final historyProvider =
+/// Consultation history — fetched from GET /consultations
+/// 에러 발생 시 AsyncError로 전파하여 UI에서 재시도 버튼 표시
+final consultationHistoryProvider =
     FutureProvider.autoDispose<List<Consultation>>((ref) async {
-  // TODO: Fetch from API
-  await Future.delayed(const Duration(milliseconds: 500));
-  return []; // Empty by default
+  final apiClient = ref.watch(apiClientProvider);
+  return await apiClient.getConsultations();
 });
 
 /// 내 분석 탭 — history list with status badges
@@ -23,7 +24,7 @@ class HistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final historyAsync = ref.watch(historyProvider);
+    final historyAsync = ref.watch(consultationHistoryProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -36,7 +37,7 @@ class HistoryScreen extends ConsumerWidget {
         ),
         error: (_, __) => ErrorRetryWidget(
           message: '불러오기 실패',
-          onRetry: () => ref.invalidate(historyProvider),
+          onRetry: () => ref.invalidate(consultationHistoryProvider),
         ),
         data: (consultations) {
           if (consultations.isEmpty) {

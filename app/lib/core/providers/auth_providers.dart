@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import '../../shared/models/models.dart';
 import '../auth/auth_service.dart';
 import '../api/api_client.dart';
@@ -28,12 +29,20 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
   Future<void> _init() async {
     final user = await _authService.getUser();
     state = AsyncValue.data(user);
+    // RevenueCat appUserID 동기화
+    if (user != null) {
+      try {
+        await Purchases.logIn(user.id);
+      } catch (_) {}
+    }
   }
 
-  Future<void> login({
+  Future<bool> login({
     required String provider,
     required String token,
   }) async {
+    // 기존 상태를 보존하면서 로딩 표시 (UI 깜빡임 방지)
+    final previousUser = state.valueOrNull;
     state = const AsyncValue.loading();
     try {
       final response = await _apiClient.login({
@@ -45,25 +54,51 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
         refreshToken: response.refreshToken,
       );
       await _authService.saveUser(response.user);
+      // RevenueCat appUserID 동기화
+      try {
+        await Purchases.logIn(response.user.id);
+      } catch (_) {}
       state = AsyncValue.data(response.user);
+      return true;
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      // 에러 시 이전 상태로 복원 (null or previous user)
+      state = AsyncValue.data(previousUser);
+      return false;
     }
   }
 
   Future<void> logout() async {
     await _authService.clearTokens();
+    // RevenueCat 로그아웃
+    try {
+      await Purchases.logOut();
+    } catch (_) {}
     state = const AsyncValue.data(null);
   }
 
-  Future<void> deleteAccount() async {
+  /// 토큰 refresh 실패 시 호출 — authState와 secure storage 동기화
+  Future<void> onTokenRefreshFailed() async {
+    await _authService.clearTokens();
+    try {
+      await Purchases.logOut();
+    } catch (_) {}
+    state = const AsyncValue.data(null);
+  }
+
+  Future<bool> deleteAccount() async {
+    final previousUser = state.valueOrNull;
     state = const AsyncValue.loading();
     try {
       await _apiClient.deleteAccount();
       await _authService.clearTokens();
+      try {
+        await Purchases.logOut();
+      } catch (_) {}
       state = const AsyncValue.data(null);
+      return true;
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      state = AsyncValue.data(previousUser);
+      return false;
     }
   }
 }

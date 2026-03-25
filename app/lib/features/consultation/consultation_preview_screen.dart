@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../shared/models/birth_input.dart';
 import '../../shared/models/payment.dart';
 import '../../shared/widgets/widgets.dart';
 import '../payment/payment_providers.dart';
@@ -14,7 +15,9 @@ import 'consultation_providers.dart';
 /// 유료 전환 — 신뢰 스캐폴딩 화면
 /// Blurred samples + example questions + social proof + disclaimer + CTA
 class ConsultationPreviewScreen extends ConsumerStatefulWidget {
-  const ConsultationPreviewScreen({super.key});
+  final BirthInput? birthInput;
+
+  const ConsultationPreviewScreen({super.key, this.birthInput});
 
   @override
   ConsumerState<ConsultationPreviewScreen> createState() =>
@@ -184,17 +187,32 @@ class _ConsultationPreviewScreenState
 
       if (orderId == null) {
         // 사용자 취소이거나 에러 — 에러 시 snackbar 표시
-        final state = ref.read(paymentFlowProvider);
-        if (state.error != null && mounted) {
+        final paymentState = ref.read(paymentFlowProvider);
+        if (paymentState.error != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.error!)),
+            SnackBar(content: Text(paymentState.error!)),
           );
         }
         return;
       }
 
-      // 결제 성공 → 상담 결과 화면으로 이동
-      if (mounted) {
+      // 결제 성공 → birthInput이 있으면 상담 생성 후 이동
+      if (widget.birthInput != null) {
+        final consultationId = await ref
+            .read(consultationCreationProvider.notifier)
+            .startConsultation(
+              birthInput: widget.birthInput!,
+              orderId: orderId,
+            );
+        if (consultationId != null && mounted) {
+          context.push('/consultation/$consultationId/result');
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('상담 생성에 실패했습니다. 다시 시도해주세요')),
+          );
+        }
+      } else if (mounted) {
+        // birthInput 없이 결제만 된 경우 (fallback)
         context.push('/consultation/$orderId/result');
       }
     } catch (e) {

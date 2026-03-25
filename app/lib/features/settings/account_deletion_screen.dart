@@ -186,11 +186,16 @@ class _AccountDeletionScreenState
 
     setState(() => _isDeleting = true);
     try {
-      await ref.read(authStateProvider.notifier).deleteAccount();
-      if (mounted) {
+      final success =
+          await ref.read(authStateProvider.notifier).deleteAccount();
+      if (success && mounted) {
         context.go('/home');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('계정이 삭제되었습니다')),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('계정 삭제에 실패했습니다. 다시 시도해주세요')),
         );
       }
     } catch (e) {

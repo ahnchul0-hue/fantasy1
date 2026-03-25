@@ -8,10 +8,11 @@ import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../shared/widgets/widgets.dart';
 import '../../shared/models/chat_message.dart';
+import '../../shared/models/consultation.dart';
 import 'chat_providers.dart';
 
 /// AI chat with 월하선생 persona
-/// Turn counter, session timer, warning ladder
+/// Turn counter, session timer from server expiry
 class ChatScreen extends ConsumerStatefulWidget {
   final String consultationId;
 
@@ -26,23 +27,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   final _focusNode = FocusNode();
 
-  // Session timer (72h) — demo countdown
+  // Session timer — driven by server-provided expiresAt
   Timer? _timer;
-  Duration _remainingTime = const Duration(hours: 72);
+  Duration? _remainingTime;
 
   @override
   void initState() {
     super.initState();
-    _startTimer();
   }
 
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_remainingTime.inSeconds > 0) {
+  void _startTimerFromExpiry(DateTime expiresAt) {
+    _timer?.cancel();
+    final diff = expiresAt.difference(DateTime.now());
+    _remainingTime = diff.isNegative ? Duration.zero : diff;
+
+    _timer = Timer.periodic(const Duration(seconds: 60), (timer) {
+      final remaining = expiresAt.difference(DateTime.now());
+      if (remaining.inSeconds > 0) {
         setState(() {
-          _remainingTime = _remainingTime - const Duration(seconds: 1);
+          _remainingTime = remaining;
         });
       } else {
+        setState(() {
+          _remainingTime = Duration.zero;
+        });
         timer.cancel();
       }
     });
@@ -59,11 +67,46 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final chatState =
+    final messagesAsync =
         ref.watch(chatMessagesProvider(widget.consultationId));
-    final isExpired =
-        chatState.warningLevel == TurnWarningLevel.expired ||
-            _remainingTime.inSeconds <= 0;
+    final sessionAsync =
+        ref.watch(consultationSessionProvider(widget.consultationId));
+
+    // Start timer when session data arrives
+    sessionAsync.whenData((consultation) {
+      if (consultation?.expiresAt != null && _timer == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _startTimerFromExpiry(consultation!.expiresAt!);
+        });
+      }
+    });
+
+    final turnsRemaining = sessionAsync.valueOrNull?.chatTurnsRemaining ?? 50;
+    final isSessionExpired = sessionAsync.valueOrNull?.isExpired ?? false;
+    final isTimeExpired = _remainingTime != null &&
+        _remainingTime!.inSeconds <= 0;
+    final isExpired = isSessionExpired || isTimeExpired;
+
+    // Turn warning
+    String? turnWarning;
+    if (turnsRemaining <= 0) {
+      turnWarning = '세션이 만료되었습니다';
+    } else if (turnsRemaining == 1) {
+      turnWarning = '마지막 턴입니다';
+    } else if (turnsRemaining <= 5) {
+      turnWarning = '남은 턴: $turnsRemaining';
+    } else if (turnsRemaining <= 10) {
+      turnWarning = '남은 턴: $turnsRemaining';
+    }
+
+    BannerType turnBannerType;
+    if (turnsRemaining <= 0) {
+      turnBannerType = BannerType.error;
+    } else if (turnsRemaining <= 5) {
+      turnBannerType = BannerType.sessionWarning;
+    } else {
+      turnBannerType = BannerType.info;
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -77,86 +120,72 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           Padding(
             padding: const EdgeInsets.only(right: AppSpacing.md),
             child: Center(
-              child: Text(
-                _formatDuration(_remainingTime),
-                style: AppTypography.caption.copyWith(
-                  color: _remainingTime.inMinutes <= 10
-                      ? AppColors.error
-                      : AppColors.secondaryText,
-                ),
-              ),
+              child: _remainingTime != null
+                  ? Text(
+                      _formatDuration(_remainingTime!),
+                      style: AppTypography.caption.copyWith(
+                        color: _remainingTime!.inMinutes <= 10
+                            ? AppColors.error
+                            : AppColors.secondaryText,
+                      ),
+                    )
+                  : Text(
+                      '상담 진행 중',
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.secondaryText,
+                      ),
+                    ),
             ),
           ),
         ],
       ),
       body: Column(
         children: [
-          // Session / turn warning banner
-          if (chatState.turnWarning != null)
+          // Turn warning banner
+          if (turnWarning != null)
             BannerWidget(
-              text: chatState.turnWarning!,
-              type: chatState.warningLevel == TurnWarningLevel.expired
-                  ? BannerType.error
-                  : chatState.warningLevel == TurnWarningLevel.last ||
-                          chatState.warningLevel ==
-                              TurnWarningLevel.critical
-                      ? BannerType.sessionWarning
-                      : BannerType.info,
+              text: turnWarning,
+              type: turnBannerType,
             ),
 
           // Time warning banners
-          if (_remainingTime.inHours <= 24 &&
-              _remainingTime.inHours > 1 &&
-              chatState.warningLevel == TurnWarningLevel.normal)
+          if (_remainingTime != null &&
+              _remainingTime!.inHours <= 24 &&
+              _remainingTime!.inHours > 1 &&
+              turnsRemaining > 10)
             BannerWidget(
-              text: '상담 ${_remainingTime.inHours}시간 남음',
+              text: '상담 ${_remainingTime!.inHours}시간 남음',
               type: BannerType.info,
             ),
-          if (_remainingTime.inMinutes <= 60 &&
-              _remainingTime.inMinutes > 10)
+          if (_remainingTime != null &&
+              _remainingTime!.inMinutes <= 60 &&
+              _remainingTime!.inMinutes > 10)
             BannerWidget(
-              text: '${_remainingTime.inMinutes}분 남음. 마지막 질문을 해보세요',
+              text: '${_remainingTime!.inMinutes}분 남음. 마지막 질문을 해보세요',
               type: BannerType.sessionWarning,
             ),
 
           // Chat messages
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-              itemCount: chatState.messages.length +
-                  (chatState.isLoading ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index == chatState.messages.length &&
-                    chatState.isLoading) {
-                  // Typing indicator
-                  return ChatBubble(
-                    message: ChatMessage(
-                      id: 'typing',
-                      role: ChatRole.assistant,
-                      content: '',
-                      createdAt: DateTime.now(),
-                    ),
-                    showTypingIndicator: true,
-                  );
-                }
-                return ChatBubble(message: chatState.messages[index]);
-              },
+            child: messagesAsync.when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ErrorRetryWidget(
+                message: '메시지를 불러올 수 없습니다',
+                onRetry: () => ref.invalidate(
+                    chatMessagesProvider(widget.consultationId)),
+              ),
+              data: (messages) => ListView.builder(
+                controller: _scrollController,
+                padding:
+                    const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                itemCount: messages.length,
+                itemBuilder: (context, index) {
+                  return ChatBubble(message: messages[index]);
+                },
+              ),
             ),
           ),
-
-          // Error message
-          if (chatState.error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-              ),
-              child: Text(
-                chatState.error!,
-                style: AppTypography.caption
-                    .copyWith(color: AppColors.error),
-              ),
-            ),
 
           // Session expired state
           if (isExpired)
@@ -183,13 +212,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
 
           // Input area
-          if (!isExpired) _buildInputArea(chatState),
+          if (!isExpired) _buildInputArea(turnsRemaining),
         ],
       ),
     );
   }
 
-  Widget _buildInputArea(ChatState chatState) {
+  Widget _buildInputArea(int turnsRemaining) {
+    final messagesAsync =
+        ref.watch(chatMessagesProvider(widget.consultationId));
+    final isSending = messagesAsync is AsyncLoading;
+
     return Container(
       padding: EdgeInsets.only(
         left: AppSpacing.md,
@@ -209,7 +242,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.xs),
             child: Text(
-              '남은 턴: ${chatState.turnsRemaining}/50',
+              '남은 턴: $turnsRemaining/50',
               style: AppTypography.caption,
             ),
           ),
@@ -235,7 +268,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           const BorderSide(color: AppColors.divider),
                     ),
                   ),
-                  onSubmitted: (_) => _sendMessage(chatState),
+                  onSubmitted: (_) => _sendMessage(),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -243,9 +276,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 width: AppDimensions.touchTargetMin,
                 height: AppDimensions.touchTargetMin,
                 child: IconButton(
-                  onPressed: chatState.isLoading
-                      ? null
-                      : () => _sendMessage(chatState),
+                  onPressed: isSending ? null : () => _sendMessage(),
                   style: IconButton.styleFrom(
                     backgroundColor: AppColors.accent,
                     foregroundColor: AppColors.primary,
@@ -262,9 +293,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  void _sendMessage(ChatState chatState) {
+  void _sendMessage() {
     final text = _controller.text.trim();
-    if (text.isEmpty || chatState.isLoading) return;
+    if (text.isEmpty) return;
 
     ref
         .read(chatMessagesProvider(widget.consultationId).notifier)

@@ -1,6 +1,10 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' as kakao;
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -112,12 +116,76 @@ class LoginScreen extends ConsumerWidget {
   }
 
   Future<void> _handleLogin(WidgetRef ref, String provider) async {
-    // TODO: Integrate actual social login SDK
-    // For now, simulate with a placeholder token
-    await ref.read(authStateProvider.notifier).login(
-          provider: provider,
-          token: 'placeholder_social_token',
+    try {
+      final token = await _getSocialToken(provider);
+      if (token == null) return;
+
+      final success = await ref.read(authStateProvider.notifier).login(
+            provider: provider,
+            token: token,
+          );
+      if (success && ref.context.mounted) {
+        ref.context.go('/home');
+      }
+    } catch (e) {
+      if (ref.context.mounted) {
+        ScaffoldMessenger.of(ref.context).showSnackBar(
+          SnackBar(content: Text('로그인 실패: ${e.toString()}')),
         );
+      }
+    }
+  }
+
+  /// Social login SDK 호출
+  Future<String?> _getSocialToken(String provider) async {
+    switch (provider) {
+      case 'kakao':
+        return _loginWithKakao();
+      case 'apple':
+        return _loginWithApple();
+      case 'google':
+        return _loginWithGoogle();
+      default:
+        return null;
+    }
+  }
+
+  Future<String?> _loginWithKakao() async {
+    try {
+      final isInstalled = await kakao.isKakaoTalkInstalled();
+      final token = isInstalled
+          ? await kakao.UserApi.instance.loginWithKakaoTalk()
+          : await kakao.UserApi.instance.loginWithKakaoAccount();
+      return token.accessToken;
+    } catch (e) {
+      debugPrint('Kakao login error: $e');
+      return null;
+    }
+  }
+
+  Future<String?> _loginWithApple() async {
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [AppleIDAuthorizationScopes.email],
+      );
+      return credential.identityToken;
+    } catch (e) {
+      debugPrint('Apple login error: $e');
+      return null;
+    }
+  }
+
+  Future<String?> _loginWithGoogle() async {
+    try {
+      final googleSignIn = GoogleSignIn(scopes: ['email']);
+      final account = await googleSignIn.signIn();
+      if (account == null) return null;
+      final auth = await account.authentication;
+      return auth.idToken;
+    } catch (e) {
+      debugPrint('Google login error: $e');
+      return null;
+    }
   }
 }
 

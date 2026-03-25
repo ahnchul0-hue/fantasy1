@@ -3,26 +3,16 @@ import 'package:go_router/go_router.dart';
 import '../theme/app_colors.dart';
 
 /// App shell with bottom navigation — 4 tabs
-/// 홈 | 내 프로필 | 내 분석 | 설정
+/// StatefulShellRoute 사용으로 탭별 네비게이션 상태 보존
 class AppShell extends StatelessWidget {
-  final Widget child;
+  final StatefulNavigationShell navigationShell;
 
-  const AppShell({super.key, required this.child});
-
-  int _currentIndex(BuildContext context) {
-    final location = GoRouterState.of(context).uri.toString();
-    if (location.startsWith('/profile')) return 1;
-    if (location.startsWith('/history')) return 2;
-    if (location.startsWith('/settings')) return 3;
-    return 0;
-  }
+  const AppShell({super.key, required this.navigationShell});
 
   @override
   Widget build(BuildContext context) {
-    final index = _currentIndex(context);
-
     return Scaffold(
-      body: child,
+      body: navigationShell,
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(
@@ -30,19 +20,11 @@ class AppShell extends StatelessWidget {
           ),
         ),
         child: BottomNavigationBar(
-          currentIndex: index,
-          onTap: (i) {
-            switch (i) {
-              case 0:
-                context.go('/home');
-              case 1:
-                context.go('/profile');
-              case 2:
-                context.go('/history');
-              case 3:
-                context.go('/settings');
-            }
-          },
+          currentIndex: navigationShell.currentIndex,
+          onTap: (i) => navigationShell.goBranch(
+            i,
+            initialLocation: i == navigationShell.currentIndex,
+          ),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),

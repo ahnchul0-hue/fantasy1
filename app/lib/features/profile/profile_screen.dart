@@ -103,8 +103,13 @@ class ProfileScreen extends ConsumerWidget {
   }
 
   Widget _buildFourPillarsTable(FourPillars pillars) {
+    // Treat hour as unknown if null OR if hanja strings are empty
+    final isHourUnknown = pillars.hour == null ||
+        (pillars.hour!.heavenlyStemHanja.isEmpty &&
+            pillars.hour!.earthlyBranchHanja.isEmpty);
+
     final pillarList = [
-      ('시주', pillars.hour),
+      ('시주', isHourUnknown ? null : pillars.hour),
       ('일주', pillars.day),
       ('월주', pillars.month),
       ('연주', pillars.year),
