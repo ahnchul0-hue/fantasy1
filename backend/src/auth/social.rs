@@ -26,9 +26,12 @@ pub struct KakaoVerifier {
 
 impl KakaoVerifier {
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-        }
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { client }
     }
 }
 
@@ -92,10 +95,12 @@ pub struct AppleVerifier {
 
 impl AppleVerifier {
     pub fn new(apple_bundle_id: String) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            apple_bundle_id,
-        }
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { client, apple_bundle_id }
     }
 }
 
@@ -212,10 +217,12 @@ pub struct GoogleVerifier {
 
 impl GoogleVerifier {
     pub fn new(client_id: String) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            client_id,
-        }
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { client, client_id }
     }
 }
 

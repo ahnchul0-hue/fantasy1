@@ -58,7 +58,7 @@ pub async fn share_link_meta(
     // Get card data for OG image
     if link.target_type == "card" {
         let card = sqlx::query_as::<_, crate::models::saju::SajuCardRow>(
-            "SELECT * FROM saju_cards WHERE id = $1",
+            "SELECT id, birth_hmac, ilju_name, ilju_hanja, keywords, lucky_element, image_url, created_at FROM saju_cards WHERE id = $1",
         )
         .bind(link.target_id)
         .fetch_optional(&state.db)
@@ -98,7 +98,7 @@ struct ShareLinkRow {
     id: String,
     target_type: String,
     target_id: uuid::Uuid,
-    referrer_id: Option<uuid::Uuid>,
+    created_by: Option<uuid::Uuid>,
     click_count: i32,
     created_at: chrono::DateTime<chrono::Utc>,
 }

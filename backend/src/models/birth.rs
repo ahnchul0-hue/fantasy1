@@ -58,6 +58,27 @@ impl BirthHour {
         }
     }
 
+    /// Convert birth hour to representative clock hour (KST) for 절기 boundary comparison.
+    /// Uses the midpoint of each 시진 (2-hour period).
+    /// Returns 12 (noon) for Unknown as a safe default.
+    pub fn to_representative_hour(&self) -> u8 {
+        match self {
+            Self::Ja => 0,       // 자시 23:00~01:00 → 0시 (midnight)
+            Self::Chuk => 2,     // 축시 01:00~03:00 → 2시
+            Self::In => 4,       // 인시 03:00~05:00 → 4시
+            Self::Myo => 6,      // 묘시 05:00~07:00 → 6시
+            Self::Jin => 8,      // 진시 07:00~09:00 → 8시
+            Self::Sa => 10,      // 사시 09:00~11:00 → 10시
+            Self::O => 12,       // 오시 11:00~13:00 → 12시
+            Self::Mi => 14,      // 미시 13:00~15:00 → 14시
+            Self::Sin => 16,     // 신시 15:00~17:00 → 16시
+            Self::Yu => 18,      // 유시 17:00~19:00 → 18시
+            Self::Sul => 20,     // 술시 19:00~21:00 → 20시
+            Self::Hae => 22,     // 해시 21:00~23:00 → 22시
+            Self::Unknown => 12, // 모름 → 정오 기본값
+        }
+    }
+
     /// Convert birth hour to index (0-11) for 시주 calculation
     /// Returns None for Unknown
     pub fn to_index(&self) -> Option<usize> {

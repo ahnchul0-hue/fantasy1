@@ -24,9 +24,10 @@ impl SajuEngine {
         // Step 1: Resolve to solar date
         let (solar_year, solar_month, solar_day) = self.resolve_solar_date(input)?;
 
-        // Step 2: Determine saju month using precise 절기 data
+        // Step 2: Determine saju month using precise 절기 data (hour-level precision)
+        let birth_hour_clock = input.birth_hour.to_representative_hour();
         let (saju_month, before_ipchun) =
-            tables::solar_date_to_saju_month(solar_year, solar_month, solar_day, 12, 0);
+            tables::solar_date_to_saju_month(solar_year, solar_month, solar_day, birth_hour_clock as u32, 0);
 
         // Step 3: Handle 야자시 (23:00-01:00) — in 야자시론, 자시 belongs to the NEXT day
         let (eff_year, eff_saju_month, day_jdn, eff_before_ipchun) =
@@ -66,12 +67,33 @@ impl SajuEngine {
     fn resolve_solar_date(&self, input: &BirthInput) -> Result<(i32, u32, u32), AppError> {
         match input.calendar_type {
             CalendarType::Solar => {
-                if input.month < 1 || input.month > 12 || input.day < 1 || input.day > 31 {
-                    return Err(AppError::BadRequest("Invalid date".to_string()));
+                // Validate year range (사주 계산 가능 범위)
+                if input.year < 1900 || input.year > 2100 {
+                    return Err(AppError::BadRequest(format!(
+                        "Year must be between 1900 and 2100, got {}",
+                        input.year
+                    )));
                 }
+                // Use chrono for calendar-aware date validation (catches 2/31, 2/29 in non-leap years, etc.)
+                chrono::NaiveDate::from_ymd_opt(input.year, input.month, input.day)
+                    .ok_or_else(|| {
+                        AppError::BadRequest(format!(
+                            "Invalid date: {}-{}-{}",
+                            input.year, input.month, input.day
+                        ))
+                    })?;
                 Ok((input.year, input.month, input.day))
             }
             CalendarType::Lunar => {
+                // 음력 변환 테이블 범위를 먼저 확인 (2020-2030만 지원)
+                if !(2020..=2030).contains(&input.year) {
+                    return Err(AppError::BadRequest(
+                        format!(
+                            "음력 변환은 2020-2030년만 지원합니다. 양력 날짜를 입력해주세요. (입력: {}년)",
+                            input.year
+                        )
+                    ));
+                }
                 let result = tables::lunar_calendar::lunar_to_solar(
                     input.year as u16,
                     input.month as u8,
@@ -81,19 +103,10 @@ impl SajuEngine {
                 match result {
                     Some((y, m, d)) => Ok((y as i32, m as u32, d as u32)),
                     None => {
-                        // 음력 변환 테이블은 2020-2030만 지원.
-                        // 이 범위 밖의 음력 입력은 양력으로 입력하도록 안내.
-                        if input.year < 2020 || input.year > 2030 {
-                            Err(AppError::BadRequest(format!(
-                                "음력 {}년은 지원 범위(2020-2030) 밖입니다. 양력(solar)으로 입력해 주세요.",
-                                input.year
-                            )))
-                        } else {
-                            Err(AppError::BadRequest(format!(
-                                "유효하지 않은 음력 날짜: {}-{}-{} (윤달: {})",
-                                input.year, input.month, input.day, input.is_leap_month
-                            )))
-                        }
+                        Err(AppError::BadRequest(format!(
+                            "유효하지 않은 음력 날짜: {}-{}-{} (윤달: {})",
+                            input.year, input.month, input.day, input.is_leap_month
+                        )))
                     }
                 }
             }
@@ -166,6 +179,25 @@ mod tests {
         let input = make_input(2026, 3, 24, BirthHour::In);
         let fp = engine.calculate_four_pillars(&input).unwrap();
         assert!(!fp.ilju_name().is_empty());
+    }
+
+    #[test]
+    fn test_solar_term_boundary_hour_precision() {
+        // 2024-02-04: 입춘 at 17:27 KST
+        // Birth at 인시(03:00~05:00) → before 입춘 → should be 축월(12), previous year
+        let engine = SajuEngine::new();
+        let input_before = make_input(2024, 2, 4, BirthHour::In);
+        let fp_before = engine.calculate_four_pillars(&input_before).unwrap();
+        // Before 입춘 → still 계묘년 (previous year: 2023 = 계묘)
+        assert_eq!(fp_before.year_pillar().stem().korean, "계",
+            "Birth before 입춘 on transition day should use previous year");
+
+        // Birth at 유시(17:00~19:00) → after 입춘 → should be 인월(1), new year
+        let input_after = make_input(2024, 2, 4, BirthHour::Yu);
+        let fp_after = engine.calculate_four_pillars(&input_after).unwrap();
+        // After 입춘 → 갑진년 (2024)
+        assert_eq!(fp_after.year_pillar().stem().korean, "갑",
+            "Birth after 입춘 on transition day should use current year");
     }
 
     #[test]

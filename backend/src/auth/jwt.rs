@@ -11,6 +11,7 @@ pub struct Claims {
     pub exp: i64,
     pub iat: i64,
     pub token_type: String, // "access" or "refresh"
+    pub jti: String,        // unique token ID to prevent collisions
 }
 
 pub struct JwtManager {
@@ -37,6 +38,7 @@ impl JwtManager {
             exp: (now + Duration::seconds(self.access_expiry_secs)).timestamp(),
             iat: now.timestamp(),
             token_type: "access".to_string(),
+            jti: Uuid::new_v4().to_string(),
         };
         encode(&Header::default(), &claims, &self.encoding_key)
             .map_err(|e| AppError::Internal(format!("JWT encode error: {}", e)))
@@ -49,6 +51,7 @@ impl JwtManager {
             exp: (now + Duration::seconds(self.refresh_expiry_secs)).timestamp(),
             iat: now.timestamp(),
             token_type: "refresh".to_string(),
+            jti: Uuid::new_v4().to_string(),
         };
         encode(&Header::default(), &claims, &self.encoding_key)
             .map_err(|e| AppError::Internal(format!("JWT encode error: {}", e)))
@@ -90,7 +93,13 @@ impl JwtManager {
         self.access_expiry_secs
     }
 
-    /// Hash a refresh token for secure storage
+    pub fn refresh_expiry_secs(&self) -> i64 {
+        self.refresh_expiry_secs
+    }
+
+    /// Hash a refresh token for secure storage.
+    /// The token already contains a unique jti claim, ensuring hash uniqueness
+    /// even for tokens issued in the same second.
     pub fn hash_token(token: &str) -> String {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();

@@ -25,8 +25,11 @@ pub async fn get_daily_fortune(
     })?;
 
     let ilju = &profile.0;
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let today_date = chrono::Utc::now().date_naive();
+    // Use KST (UTC+9) for "today" since this is a Korean service
+    let kst = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+    let now_kst = chrono::Utc::now().with_timezone(&kst);
+    let today = now_kst.format("%Y-%m-%d").to_string();
+    let today_date = now_kst.date_naive();
 
     // Check Redis cache first
     if let Some(cached) = state.cache.get_cached_daily_fortune(&today, ilju).await? {
@@ -53,7 +56,7 @@ pub async fn get_daily_fortune(
         return Ok(Json(response));
     }
 
-    // Fortune not pre-generated yet - generate on demand as fallback
+    // Fortune not pre-generated yet - generate on demand
     // (The batch job should have created this, but handle the miss gracefully)
     tracing::warn!(
         "Daily fortune not pre-generated for date={}, ilju={}. Generating on demand.",
@@ -61,8 +64,8 @@ pub async fn get_daily_fortune(
         ilju
     );
 
-    // Get today's day pillar for context
-    let today_chrono = chrono::Utc::now().naive_utc().date();
+    // Get today's day pillar for context (KST)
+    let today_chrono = now_kst.date_naive();
     let jdn = crate::saju::tables::solar_to_jdn(
         today_chrono.year(),
         today_chrono.month(),
@@ -70,7 +73,8 @@ pub async fn get_daily_fortune(
     );
     let day_pillar = crate::saju::tables::day_pillar_from_jdn(jdn);
 
-    let (fortune_text, lucky_color, lucky_number, overall_score) = state
+    // Try to generate with LLM; on failure return temporary fallback WITHOUT persisting
+    let generation_result = state
         .saju_interpreter
         .generate_daily_fortune(
             ilju,
@@ -78,49 +82,68 @@ pub async fn get_daily_fortune(
             day_pillar.stem().korean,
             day_pillar.branch().korean,
         )
-        .await
-        .unwrap_or_else(|_| {
-            // Ultimate fallback: generic fortune
-            (
-                "오늘 하루도 좋은 일이 있을 것입니다. 마음의 여유를 가지고 하루를 시작해보세요.".to_string(),
-                "파란색".to_string(),
-                7,
-                3,
+        .await;
+
+    match generation_result {
+        Ok((fortune_text, lucky_color, lucky_number, overall_score)) => {
+            // LLM succeeded — save to DB so other users with the same ilju get it
+            let fortune_id = uuid::Uuid::new_v4();
+            let rows = sqlx::query(
+                r#"
+                INSERT INTO daily_fortunes (id, date, ilju, fortune_text, lucky_color, lucky_number, overall_score)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (date, ilju) DO NOTHING
+                "#,
             )
-        });
+            .bind(fortune_id)
+            .bind(today_date)
+            .bind(ilju)
+            .bind(&fortune_text)
+            .bind(&lucky_color)
+            .bind(lucky_number)
+            .bind(overall_score)
+            .execute(&state.db)
+            .await?;
 
-    // Save to DB
-    let fortune_id = uuid::Uuid::new_v4();
-    sqlx::query(
-        r#"
-        INSERT INTO daily_fortunes (id, date, ilju, fortune_text, lucky_color, lucky_number, overall_score)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (date, ilju) DO NOTHING
-        "#,
-    )
-    .bind(fortune_id)
-    .bind(today_date)
-    .bind(ilju)
-    .bind(&fortune_text)
-    .bind(&lucky_color)
-    .bind(lucky_number)
-    .bind(overall_score)
-    .execute(&state.db)
-    .await?;
+            // If conflict, read the winning row for deterministic response
+            let response = if rows.rows_affected() == 0 {
+                let winner = sqlx::query_as::<_, DailyFortuneRow>(
+                    "SELECT * FROM daily_fortunes WHERE date = $1 AND ilju = $2",
+                )
+                .bind(today_date)
+                .bind(ilju)
+                .fetch_one(&state.db)
+                .await?;
+                winner.to_response()
+            } else {
+                DailyFortuneResponse {
+                    date: today_date,
+                    ilju: ilju.clone(),
+                    fortune_text,
+                    lucky_color,
+                    lucky_number,
+                    overall_score,
+                    is_temporary: false,
+                }
+            };
 
-    let response = DailyFortuneResponse {
-        date: today_date,
-        ilju: ilju.clone(),
-        fortune_text,
-        lucky_color,
-        lucky_number,
-        overall_score,
-    };
+            // Cache only successful fortunes
+            if let Ok(json) = serde_json::to_string(&response) {
+                let _ = state.cache.cache_daily_fortune(&today, ilju, &json).await;
+            }
 
-    // Cache it
-    if let Ok(json) = serde_json::to_string(&response) {
-        let _ = state.cache.cache_daily_fortune(&today, ilju, &json).await;
+            Ok(Json(response))
+        }
+        Err(e) => {
+            // LLM failed — return temporary fallback WITHOUT saving to DB or cache.
+            // Next request will retry LLM generation.
+            tracing::warn!(
+                "Fortune generation failed for ilju={}, date={}: {}. Returning temporary fallback.",
+                ilju,
+                today,
+                e
+            );
+            Ok(Json(DailyFortuneResponse::temporary_fallback(ilju, today_date)))
+        }
     }
-
-    Ok(Json(response))
 }

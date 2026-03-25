@@ -58,35 +58,25 @@ impl FourPillars {
         &HEAVENLY_STEMS[self.day_stem as usize]
     }
 
-    /// Get the 일주 name (e.g., "갑목")
+    /// Get the 일주 name in Korean (e.g., "갑자")
+    /// 일주 = 일간(天干) + 일지(地支), NOT 일간 + 오행
     pub fn ilju_name(&self) -> String {
-        let stem = self.day_master();
-        let elem_korean = match stem.element {
-            Element::Wood => "목",
-            Element::Fire => "화",
-            Element::Earth => "토",
-            Element::Metal => "금",
-            Element::Water => "수",
-        };
-        format!("{}{}", stem.korean, elem_korean)
+        let stem = &HEAVENLY_STEMS[self.day_stem as usize];
+        let branch = &EARTHLY_BRANCHES[self.day_branch as usize];
+        format!("{}{}", stem.korean, branch.korean)
     }
 
-    /// Get the 일주 hanja (e.g., "甲木")
+    /// Get the 일주 hanja (e.g., "甲子")
     pub fn ilju_hanja(&self) -> String {
-        let stem = self.day_master();
-        let elem_hanja = match stem.element {
-            Element::Wood => "木",
-            Element::Fire => "火",
-            Element::Earth => "土",
-            Element::Metal => "金",
-            Element::Water => "水",
-        };
-        format!("{}{}", stem.hanja, elem_hanja)
+        let stem = &HEAVENLY_STEMS[self.day_stem as usize];
+        let branch = &EARTHLY_BRANCHES[self.day_branch as usize];
+        format!("{}{}", stem.hanja, branch.hanja)
     }
 
-    /// Get the 일주 key for daily fortune lookup (e.g., "갑자")
+    /// Get the 일주 key for daily fortune lookup — same as ilju_name (e.g., "갑자")
+    /// 60갑자 중 하나로, 오늘의 운세 사전 생성 키로 사용
     pub fn ilju_key(&self) -> String {
-        tables::ilju_from_day_index(self.day_stem) // Uses stem index as cycle position
+        self.ilju_name()
     }
 }
 
@@ -378,8 +368,62 @@ pub struct SajuCardRow {
     pub keywords: serde_json::Value,
     pub lucky_element: String,
     pub image_url: Option<String>,
-    pub share_url: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 60갑자 회귀 테스트: ilju_name()이 천간+지지 조합을 정확히 반환하는지 검증
+    #[test]
+    fn test_ilju_name_all_60_ganji() {
+        let expected_60 = [
+            "갑자", "을축", "병인", "정묘", "무진", "기사", "경오", "신미", "임신", "계유",
+            "갑술", "을해", "병자", "정축", "무인", "기묘", "경진", "신사", "임오", "계미",
+            "갑신", "을유", "병술", "정해", "무자", "기축", "경인", "신묘", "임진", "계사",
+            "갑오", "을미", "병신", "정유", "무술", "기해", "경자", "신축", "임인", "계묘",
+            "갑진", "을사", "병오", "정미", "무신", "기유", "경술", "신해", "임자", "계축",
+            "갑인", "을묘", "병진", "정사", "무오", "기미", "경신", "신유", "임술", "계해",
+        ];
+
+        for (i, expected) in expected_60.iter().enumerate() {
+            let stem_idx = (i % 10) as u8;
+            let branch_idx = (i % 12) as u8;
+            let fp = FourPillars {
+                year_stem: 0, year_branch: 0,
+                month_stem: 0, month_branch: 0,
+                day_stem: stem_idx, day_branch: branch_idx,
+                hour_stem: None, hour_branch: None,
+            };
+            assert_eq!(
+                fp.ilju_name(), *expected,
+                "60갑자 #{}: expected {} but got {}", i, expected, fp.ilju_name()
+            );
+            // ilju_key()는 ilju_name()과 동일해야 함
+            assert_eq!(fp.ilju_key(), fp.ilju_name(), "ilju_key != ilju_name at #{}", i);
+        }
+    }
+
+    /// ilju_hanja()가 한자 조합을 정확히 반환하는지 검증 (첫 번째와 마지막)
+    #[test]
+    fn test_ilju_hanja_boundaries() {
+        let fp_first = FourPillars {
+            year_stem: 0, year_branch: 0,
+            month_stem: 0, month_branch: 0,
+            day_stem: 0, day_branch: 0,
+            hour_stem: None, hour_branch: None,
+        };
+        assert_eq!(fp_first.ilju_hanja(), "甲子");
+
+        let fp_last = FourPillars {
+            year_stem: 0, year_branch: 0,
+            month_stem: 0, month_branch: 0,
+            day_stem: 9, day_branch: 11,
+            hour_stem: None, hour_branch: None,
+        };
+        assert_eq!(fp_last.ilju_hanja(), "癸亥");
+    }
 }
 
 /// Helper: element Korean name from Element enum

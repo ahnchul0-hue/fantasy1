@@ -4,15 +4,20 @@
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     provider VARCHAR(20) NOT NULL CHECK (provider IN ('kakao', 'apple', 'google')),
-    provider_id VARCHAR(255) NOT NULL,
+    provider_user_id VARCHAR(255) NOT NULL,
     nickname VARCHAR(100),
     has_profile BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
 
-    CONSTRAINT uq_users_provider_provider_id UNIQUE (provider, provider_id)
+    -- No table-level unique: partial index below handles active-only uniqueness
+    CONSTRAINT chk_users_provider CHECK (provider IN ('kakao', 'apple', 'google'))
 );
+
+-- Unique only among active (non-deleted) users — allows re-signup after deletion
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_active_provider
+    ON users (provider, provider_user_id) WHERE deleted_at IS NULL;
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_provider ON users (provider);

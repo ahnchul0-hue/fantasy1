@@ -4,6 +4,7 @@ use crate::auth::middleware::AuthUser;
 use crate::errors::AppError;
 use crate::models::birth::BirthInput;
 use crate::models::saju::*;
+use crate::saju::tables;
 use crate::state::AppState;
 
 /// GET /v1/profile — Get user's lifetime saju profile
@@ -63,31 +64,28 @@ pub async fn get_profile(
         gender,
     };
 
-    // Reconstruct four pillars from stored data
+    // Reconstruct four pillars from stored data, populating hanja from lookup tables
     let four_pillars = FourPillarsResponse {
-        year: PillarResponse {
-            heavenly_stem: row.year_heavenly_stem.clone(),
-            earthly_branch: row.year_earthly_branch.clone(),
-            heavenly_stem_hanja: "".to_string(), // Will be filled from lookup
-            earthly_branch_hanja: "".to_string(),
-        },
-        month: PillarResponse {
-            heavenly_stem: row.month_heavenly_stem.clone(),
-            earthly_branch: row.month_earthly_branch.clone(),
-            heavenly_stem_hanja: "".to_string(),
-            earthly_branch_hanja: "".to_string(),
-        },
-        day: PillarResponse {
-            heavenly_stem: row.day_heavenly_stem.clone(),
-            earthly_branch: row.day_earthly_branch.clone(),
-            heavenly_stem_hanja: "".to_string(),
-            earthly_branch_hanja: "".to_string(),
-        },
-        hour: PillarResponse {
-            heavenly_stem: row.hour_heavenly_stem.clone().unwrap_or("미상".to_string()),
-            earthly_branch: row.hour_earthly_branch.clone().unwrap_or("미상".to_string()),
-            heavenly_stem_hanja: "".to_string(),
-            earthly_branch_hanja: "".to_string(),
+        year: pillar_response_from_korean(
+            &row.year_heavenly_stem,
+            &row.year_earthly_branch,
+        ),
+        month: pillar_response_from_korean(
+            &row.month_heavenly_stem,
+            &row.month_earthly_branch,
+        ),
+        day: pillar_response_from_korean(
+            &row.day_heavenly_stem,
+            &row.day_earthly_branch,
+        ),
+        hour: match (&row.hour_heavenly_stem, &row.hour_earthly_branch) {
+            (Some(stem), Some(branch)) => pillar_response_from_korean(stem, branch),
+            _ => PillarResponse {
+                heavenly_stem: "미상".to_string(),
+                earthly_branch: "미상".to_string(),
+                heavenly_stem_hanja: "未詳".to_string(),
+                earthly_branch_hanja: "未詳".to_string(),
+            },
         },
     };
 
@@ -185,6 +183,22 @@ pub async fn create_or_update_profile(
         .await?;
 
     Ok(())
+}
+
+/// Build a PillarResponse from stored Korean names, looking up hanja from tables.
+fn pillar_response_from_korean(stem_korean: &str, branch_korean: &str) -> PillarResponse {
+    let stem_hanja = tables::stem_by_korean(stem_korean)
+        .map(|s| s.hanja.to_string())
+        .unwrap_or_default();
+    let branch_hanja = tables::branch_by_korean(branch_korean)
+        .map(|b| b.hanja.to_string())
+        .unwrap_or_default();
+    PillarResponse {
+        heavenly_stem: stem_korean.to_string(),
+        earthly_branch: branch_korean.to_string(),
+        heavenly_stem_hanja: stem_hanja,
+        earthly_branch_hanja: branch_hanja,
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]

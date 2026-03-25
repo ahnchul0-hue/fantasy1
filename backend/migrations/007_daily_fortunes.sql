@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS daily_fortunes (
     -- 일주: 2-char combo e.g. "갑자"
     fortune_text TEXT NOT NULL,
     lucky_color VARCHAR(30) NOT NULL,
-    lucky_number INTEGER CHECK (lucky_number BETWEEN 1 AND 99),
+    lucky_number INTEGER NOT NULL CHECK (lucky_number BETWEEN 1 AND 99),
     overall_score INTEGER NOT NULL CHECK (overall_score BETWEEN 1 AND 5),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -16,5 +16,4 @@ CREATE TABLE IF NOT EXISTS daily_fortunes (
 -- Primary lookup: today's fortune for a specific ilju
 CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_fortunes_date_ilju ON daily_fortunes (date, ilju);
 
--- Cleanup of old fortunes
-CREATE INDEX IF NOT EXISTS idx_daily_fortunes_date ON daily_fortunes (date);
+-- Note: idx_daily_fortunes_date removed — (date, ilju) unique index covers date-prefix queries

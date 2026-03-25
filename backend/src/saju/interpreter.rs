@@ -148,15 +148,51 @@ impl SajuInterpreter {
         )
     }
 
+    /// Validate that a daily fortune LLM response has meaningful content.
+    fn validate_fortune_response(
+        fortune_text: &str,
+        lucky_color: &str,
+        lucky_number: Option<i64>,
+        overall_score: Option<i64>,
+    ) -> bool {
+        // Reject empty or generic fallback text
+        if fortune_text.is_empty() || fortune_text == "오늘의 운세입니다" {
+            return false;
+        }
+        if lucky_color.is_empty() {
+            return false;
+        }
+        // Require both numeric fields to be present with valid ranges
+        match (lucky_number, overall_score) {
+            (Some(n), Some(s)) => n > 0 && s >= 1 && s <= 5,
+            _ => false,
+        }
+    }
+
     fn validate_interpretation(&self, text: &str, analysis: &SajuAnalysis) -> Result<(), AppError> {
+        let mut contradictions = Vec::new();
+
         for (elem, status) in &analysis.element_statuses {
             if status == "과다" && (text.contains(&format!("{} 부족", elem)) || text.contains(&format!("{}이 부족", elem))) {
-                tracing::warn!("L3 validation: {} is 과다 but text says 부족", elem);
+                contradictions.push(format!("{}: L2=과다 but L3 says 부족", elem));
             }
             if status == "부족" && (text.contains(&format!("{} 과다", elem)) || text.contains(&format!("{}이 과다", elem))) {
-                tracing::warn!("L3 validation: {} is 부족 but text says 과다", elem);
+                contradictions.push(format!("{}: L2=부족 but L3 says 과다", elem));
             }
         }
+
+        if !contradictions.is_empty() {
+            tracing::error!(
+                "L3 validation failed: {} contradiction(s): {}",
+                contradictions.len(),
+                contradictions.join("; ")
+            );
+            return Err(AppError::Internal(format!(
+                "AI interpretation contradicts analysis data: {}",
+                contradictions.join("; ")
+            )));
+        }
+
         Ok(())
     }
 
@@ -174,12 +210,40 @@ impl SajuInterpreter {
             system, &[ClaudeMessage { role: "user".to_string(), content: user }], 500
         ).await?;
 
-        let parsed: serde_json::Value = serde_json::from_str(&response).unwrap_or_else(|_| serde_json::json!({}));
+        // Try direct parse first, then extract JSON from mixed text
+        let parsed: serde_json::Value = serde_json::from_str(&response).or_else(|_| {
+            // LLM sometimes wraps JSON in markdown or extra text — extract {...}
+            if let Some(start) = response.find('{') {
+                if let Some(end) = response.rfind('}') {
+                    return serde_json::from_str(&response[start..=end]);
+                }
+            }
+            Err(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "No JSON object found in LLM response",
+            )))
+        }).map_err(|e| {
+            tracing::warn!("Failed to parse LLM fortune response as JSON: {}", &response[..response.len().min(200)]);
+            AppError::Internal(format!("LLM returned malformed JSON: {}", e))
+        })?;
+
+        // Validate that the response has meaningful content
+        let fortune_text = parsed["fortune_text"].as_str().unwrap_or("").to_string();
+        let lucky_color = parsed["lucky_color"].as_str().unwrap_or("").to_string();
+        let lucky_number = parsed["lucky_number"].as_i64();
+        let overall_score = parsed["overall_score"].as_i64();
+
+        if !Self::validate_fortune_response(&fortune_text, &lucky_color, lucky_number, overall_score) {
+            return Err(AppError::Internal(
+                "LLM fortune response failed validation: missing or generic content".to_string(),
+            ));
+        }
+
         Ok((
-            parsed["fortune_text"].as_str().unwrap_or("오늘 하루도 좋은 일이 있을 것입니다.").to_string(),
-            parsed["lucky_color"].as_str().unwrap_or("파란색").to_string(),
-            parsed["lucky_number"].as_i64().unwrap_or(7) as i32,
-            parsed["overall_score"].as_i64().unwrap_or(3).max(1).min(5) as i32,
+            fortune_text,
+            lucky_color,
+            lucky_number.unwrap_or(7) as i32,
+            overall_score.unwrap_or(3).max(1).min(5) as i32,
         ))
     }
 }

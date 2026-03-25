@@ -75,7 +75,7 @@ pub struct ChatMessageRow {
     pub id: Uuid,
     pub consultation_id: Uuid,
     pub role: String,
-    pub content: String,
-    pub token_count: Option<i32>,
+    pub content_enc: Vec<u8>,
+    pub token_count: i32,
     pub created_at: DateTime<Utc>,
 }

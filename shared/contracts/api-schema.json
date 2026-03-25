@@ -202,7 +202,8 @@
     "/fortune/daily": {
       "get": {
         "summary": "오늘의 운세 (일주별 사전 생성, 캐시)",
-        "description": "인증 없이 호출 시 일반 운세, 인증 시 일주별 맞춤 운세 반환",
+        "description": "인증 필수. 사용자의 일주(日柱) 기반 맞춤 운세 반환. 프로필 필요.",
+        "security": [{ "bearerAuth": [] }],
         "responses": {
           "200": {
             "content": {
@@ -231,15 +232,31 @@
     },
     "/payment/verify": {
       "post": {
-        "summary": "IAP 영수증 검증 (RevenueCat webhook)",
+        "summary": "IAP 영수증 검증",
+        "security": [{ "bearerAuth": [] }],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": { "$ref": "#/components/schemas/PaymentVerification" }
-              }
+            }
           }
         },
-        "responses": { "200": { "description": "검증 완료" } }
+        "responses": {
+          "200": {
+            "description": "검증 완료",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "verified": { "type": "boolean" },
+                    "order_id": { "type": ["string", "null"], "format": "uuid" }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -252,7 +269,7 @@
         "type": "object",
         "required": ["year", "month", "day", "calendar_type", "gender"],
         "properties": {
-          "year": { "type": "integer", "minimum": 1900, "maximum": 2100 },
+          "year": { "type": "integer", "minimum": 1900, "maximum": 2100, "description": "Birth year (solar: 1900-2100, lunar calendar supported for 2020-2030 only)" },
           "month": { "type": "integer", "minimum": 1, "maximum": 12 },
           "day": { "type": "integer", "minimum": 1, "maximum": 31 },
           "calendar_type": { "type": "string", "enum": ["solar", "lunar"] },
@@ -275,7 +292,7 @@
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "provider": { "type": "string" },
-          "nickname": { "type": "string" },
+          "nickname": { "type": ["string", "null"] },
           "has_profile": { "type": "boolean" },
           "created_at": { "type": "string", "format": "date-time" }
         }
@@ -288,8 +305,8 @@
           "ilju_hanja": { "type": "string", "description": "일주 한자 e.g. 甲木" },
           "keywords": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
           "lucky_element": { "type": "string" },
-          "image_url": { "type": "string", "format": "uri" },
-          "share_url": { "type": "string", "format": "uri" },
+          "image_url": { "type": ["string", "null"], "format": "uri" },
+          "share_url": { "type": ["string", "null"], "format": "uri" },
           "cached": { "type": "boolean" }
         }
       },
@@ -307,7 +324,7 @@
           "id": { "type": "string", "format": "uuid" },
           "status": { "type": "string", "enum": ["generating", "ready", "expired", "failed"] },
           "result_images": { "type": "array", "items": { "type": "string", "format": "uri" } },
-          "analysis_summary": { "type": "string" },
+          "analysis_summary": { "type": ["string", "null"] },
           "chat_turns_remaining": { "type": "integer" },
           "expires_at": { "type": "string", "format": "date-time" },
           "checkpoint_status": { "type": "string", "enum": ["none", "analysis_done", "images_done", "complete"] }

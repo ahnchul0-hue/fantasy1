@@ -31,8 +31,14 @@ pub struct ClaudeClient {
 
 impl ClaudeClient {
     pub fn new(api_key: String, model: String, max_cost_per_session_usd: f64) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             model,
             max_cost_per_session_usd,

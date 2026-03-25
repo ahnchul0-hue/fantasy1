@@ -12,7 +12,10 @@ CREATE TABLE IF NOT EXISTS saju_profiles (
     birth_day_enc BYTEA NOT NULL,
     calendar_type VARCHAR(10) NOT NULL CHECK (calendar_type IN ('solar', 'lunar')),
     is_leap_month BOOLEAN NOT NULL DEFAULT false,
-    birth_hour VARCHAR(20),
+    birth_hour VARCHAR(20) CHECK (birth_hour IN (
+        'ja', 'chuk', 'in', 'myo', 'jin', 'sa',
+        'o', 'mi', 'sin', 'yu', 'sul', 'hae', 'unknown'
+    )),
     gender VARCHAR(10) NOT NULL CHECK (gender IN ('male', 'female')),
     birth_hmac VARCHAR(64) NOT NULL,
 
@@ -26,6 +29,16 @@ CREATE TABLE IF NOT EXISTS saju_profiles (
     hour_heavenly_stem VARCHAR(10),
     hour_earthly_branch VARCHAR(10),
 
+    -- Constraints: solar calendar cannot have leap month
+    CONSTRAINT chk_solar_no_leap CHECK (
+        NOT (calendar_type = 'solar' AND is_leap_month = true)
+    ),
+    -- Constraints: hour stem and branch must both be present or both null
+    CONSTRAINT chk_hour_pillar_pair CHECK (
+        (hour_heavenly_stem IS NULL AND hour_earthly_branch IS NULL) OR
+        (hour_heavenly_stem IS NOT NULL AND hour_earthly_branch IS NOT NULL)
+    ),
+
     -- Derived data
     oheng_balance JSONB NOT NULL,
     ilju_name VARCHAR(20) NOT NULL,
@@ -37,7 +50,7 @@ CREATE TABLE IF NOT EXISTS saju_profiles (
     CONSTRAINT uq_saju_profiles_user_id UNIQUE (user_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_saju_profiles_user_id ON saju_profiles (user_id);
+-- Note: idx_saju_profiles_user_id removed — UNIQUE constraint already creates an index
 CREATE INDEX IF NOT EXISTS idx_saju_profiles_ilju_name ON saju_profiles (ilju_name);
 CREATE INDEX IF NOT EXISTS idx_saju_profiles_birth_hmac ON saju_profiles (birth_hmac);
 

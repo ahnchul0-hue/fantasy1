@@ -14,21 +14,72 @@ use crate::models::saju::*;
 use crate::services::claude::ClaudeMessage;
 use crate::state::AppState;
 
+/// GET /v1/saju/card/{id} — Retrieve a saju card by ID (for share pages)
+pub async fn get_card(
+    State(state): State<AppState>,
+    Path(card_id): Path<Uuid>,
+) -> Result<Json<SajuCardResponse>, AppError> {
+    let row = sqlx::query_as::<_, SajuCardRow>(
+        "SELECT id, birth_hmac, ilju_name, ilju_hanja, keywords, lucky_element, image_url, created_at FROM saju_cards WHERE id = $1",
+    )
+    .bind(card_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Saju card not found".to_string()))?;
+
+    // Look up share link for this card (most recent if duplicates exist)
+    let share_url: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM share_links WHERE target_type = 'card' AND target_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(card_id)
+    .fetch_optional(&state.db)
+    .await?
+    .map(|id: String| format!("https://saju.app/s/{}", id));
+
+    let keywords: Vec<String> = serde_json::from_value(row.keywords.clone()).unwrap_or_else(|e| {
+        tracing::warn!("Failed to deserialize keywords for card {}: {}", card_id, e);
+        Vec::new()
+    });
+
+    Ok(Json(SajuCardResponse {
+        id: row.id,
+        ilju_name: row.ilju_name,
+        ilju_hanja: row.ilju_hanja,
+        keywords,
+        lucky_element: row.lucky_element,
+        image_url: row.image_url,
+        share_url,
+        cached: false,
+    }))
+}
+
 /// POST /v1/saju/card — Free saju card generation
 pub async fn create_card(
     State(state): State<AppState>,
     headers: HeaderMap,
+    auth: Option<axum::Extension<AuthUser>>,
     Json(input): Json<BirthInput>,
 ) -> Result<Json<SajuCardResponse>, AppError> {
-    // Rate limiting: device-based 3/day
+    // Rate limiting: device-based 3/day, with IP fallback
     let device_id = headers
         .get("X-Device-ID")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
+        .filter(|id| !id.is_empty())
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| {
+            // Fallback to IP-based rate limiting when no device ID
+            headers
+                .get("X-Forwarded-For")
+                .or_else(|| headers.get("X-Real-IP"))
+                .and_then(|v| v.to_str().ok())
+                .and_then(|ip| ip.split(',').next())
+                .map(|ip| format!("ip:{}", ip.trim()))
+                .unwrap_or_else(|| "ip:unknown".to_string())
+        });
 
     let (count, allowed) = state
         .cache
-        .check_rate_limit(device_id, "free_card", state.config.free_card_daily_limit)
+        .check_rate_limit(&device_id, "free_card", state.config.free_card_daily_limit)
         .await?;
 
     if !allowed {
@@ -71,14 +122,15 @@ pub async fn create_card(
         }
     };
 
-    // Save card to DB
+    // Save card to DB (handle duplicate birth_hmac race condition)
     let card_id = Uuid::new_v4();
     let keywords_json = serde_json::to_value(&analysis.keywords).unwrap_or_default();
 
-    sqlx::query(
+    let rows = sqlx::query(
         r#"
         INSERT INTO saju_cards (id, birth_hmac, ilju_name, ilju_hanja, keywords, lucky_element, image_url)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (birth_hmac) DO NOTHING
         "#,
     )
     .bind(card_id)
@@ -91,17 +143,42 @@ pub async fn create_card(
     .execute(&state.db)
     .await?;
 
-    // Generate share URL (custom redirect service)
-    let share_id = generate_share_id();
-    let share_url = format!("https://saju.app/s/{}", share_id);
+    // If conflict (duplicate birth_hmac), return existing card
+    let card_id = if rows.rows_affected() == 0 {
+        let existing: (Uuid,) = sqlx::query_as(
+            "SELECT id FROM saju_cards WHERE birth_hmac = $1",
+        )
+        .bind(&cache_key)
+        .fetch_one(&state.db)
+        .await?;
+        existing.0
+    } else {
+        card_id
+    };
 
-    sqlx::query(
-        "INSERT INTO share_links (id, target_type, target_id) VALUES ($1, 'card', $2)",
+    // Generate share URL (custom redirect service) — reuse existing link if one exists
+    let existing_share_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM share_links WHERE target_type = 'card' AND target_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
-    .bind(&share_id)
     .bind(card_id)
-    .execute(&state.db)
+    .fetch_optional(&state.db)
     .await?;
+
+    let share_id = if let Some(existing_id) = existing_share_id {
+        existing_id
+    } else {
+        let new_id = generate_share_id();
+        sqlx::query(
+            "INSERT INTO share_links (id, target_type, target_id) VALUES ($1, 'card', $2)",
+        )
+        .bind(&new_id)
+        .bind(card_id)
+        .execute(&state.db)
+        .await?;
+        new_id
+    };
+
+    let share_url = format!("https://saju.app/s/{}", share_id);
 
     let response = SajuCardResponse {
         id: card_id,
@@ -117,6 +194,15 @@ pub async fn create_card(
     // Cache the result
     if let Ok(json) = serde_json::to_string(&response) {
         let _ = state.cache.cache_saju_card(&cache_key, &json).await;
+    }
+
+    // If authenticated user (via optional_auth_middleware), save/update saju profile
+    if let Some(axum::Extension(auth_user)) = &auth {
+        if let Err(e) = super::profile::create_or_update_profile(
+            &state, auth_user.user_id, &input, &four_pillars, &analysis.oheng_balance,
+        ).await {
+            tracing::warn!("Failed to update profile for user {}: {}", auth_user.user_id, e);
+        }
     }
 
     Ok(Json(response))
@@ -140,17 +226,49 @@ pub async fn create_consultation(
         AppError::PaymentRequired("Valid payment not found for this receipt".to_string())
     })?;
 
+    // Verify the order's product_id is a consultation product (prevents using
+    // cheaper compatibility purchases to unlock full consultations)
+    if !order.product_id.starts_with("saju_consultation_") {
+        return Err(AppError::BadRequest(
+            "Invalid product for consultation".to_string(),
+        ));
+    }
+
     // Check for existing consultation with this order (idempotency)
     let existing = sqlx::query_as::<_, ConsultationRow>(
-        "SELECT * FROM consultations WHERE order_id = $1",
+        r#"SELECT id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
+               status::text as status, checkpoint_status::text as checkpoint_status,
+               analysis_summary, result_images, chat_turns_remaining, chat_turns_used,
+               chat_context, expires_at, created_at, updated_at
+        FROM consultations WHERE order_id = $1"#,
     )
     .bind(order.id)
     .fetch_optional(&state.db)
     .await?;
 
-    if let Some(existing) = existing {
-        return Ok(Json(existing.to_response()));
-    }
+    // Track whether we are retrying a failed consultation
+    let retry_consultation_id = if let Some(existing) = existing {
+        if existing.status == "failed" {
+            // Reset failed consultation for retry
+            sqlx::query(
+                "UPDATE consultations SET status = 'generating', updated_at = NOW() WHERE id = $1",
+            )
+            .bind(existing.id)
+            .execute(&state.db)
+            .await?;
+
+            tracing::info!(
+                consultation_id = %existing.id,
+                user_id = %auth.user_id,
+                "Retrying failed consultation"
+            );
+            Some(existing.id)
+        } else {
+            return Ok(Json(existing.to_response()));
+        }
+    } else {
+        None
+    };
 
     // Step 2: Layer 1 - Calculate four pillars
     let four_pillars = state.saju_engine.calculate_four_pillars(&req.birth_input)?;
@@ -166,27 +284,67 @@ pub async fn create_consultation(
     let four_pillars_json = serde_json::to_value(&four_pillars).unwrap_or_default();
     let analysis_json = serde_json::to_value(&analysis).unwrap_or_default();
 
-    // Step 4: Create consultation record with 'generating' status
-    let consultation_id = Uuid::new_v4();
-    let expires_at = Utc::now() + Duration::hours(72);
+    let consultation_id;
+    let expires_at;
 
-    sqlx::query(
-        r#"
-        INSERT INTO consultations
-            (id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
-             status, checkpoint_status, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, 'generating', 'none', $7)
-        "#,
-    )
-    .bind(consultation_id)
-    .bind(auth.user_id)
-    .bind(order.id)
-    .bind(&birth_enc)
-    .bind(&four_pillars_json)
-    .bind(&analysis_json)
-    .bind(expires_at)
-    .execute(&state.db)
-    .await?;
+    if let Some(existing_id) = retry_consultation_id {
+        // Retry: update existing consultation with fresh L1+L2 data
+        consultation_id = existing_id;
+        expires_at = Utc::now() + Duration::hours(72);
+
+        sqlx::query(
+            r#"
+            UPDATE consultations
+            SET birth_data_enc = $1, four_pillars = $2, analysis_data = $3,
+                checkpoint_status = 'none', expires_at = $4, updated_at = NOW()
+            WHERE id = $5
+            "#,
+        )
+        .bind(&birth_enc)
+        .bind(&four_pillars_json)
+        .bind(&analysis_json)
+        .bind(expires_at)
+        .bind(consultation_id)
+        .execute(&state.db)
+        .await?;
+    } else {
+        // New consultation
+        consultation_id = Uuid::new_v4();
+        expires_at = Utc::now() + Duration::hours(72);
+
+        // Derive consultation type from product_id
+        let consultation_type = if order.product_id.starts_with("compatibility_") {
+            "compatibility_consultation"
+        } else {
+            "saju_consultation"
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO consultations
+                (id, user_id, order_id, consultation_type, birth_data_enc, four_pillars, analysis_data,
+                 status, checkpoint_status, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'generating', 'none', $8)
+            "#,
+        )
+        .bind(consultation_id)
+        .bind(auth.user_id)
+        .bind(order.id)
+        .bind(consultation_type)
+        .bind(&birth_enc)
+        .bind(&four_pillars_json)
+        .bind(&analysis_json)
+        .bind(expires_at)
+        .execute(&state.db)
+        .await?;
+    }
+
+    // Save/update user's saju profile (after consultation INSERT succeeds)
+    if let Err(e) = super::profile::create_or_update_profile(
+        &state, auth.user_id, &req.birth_input, &four_pillars, &analysis.oheng_balance,
+    ).await {
+        tracing::warn!("Failed to update profile for user {}: {}", auth.user_id, e);
+    }
 
     // Step 5: Generate L3 interpretation (Claude API)
     // This is async but we do it inline for the initial response
@@ -279,7 +437,11 @@ pub async fn consultation_status(
     Path(consultation_id): Path<Uuid>,
 ) -> Result<Json<ConsultationResponse>, AppError> {
     let consultation = sqlx::query_as::<_, ConsultationRow>(
-        "SELECT * FROM consultations WHERE id = $1 AND user_id = $2",
+        r#"SELECT id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
+               status::text as status, checkpoint_status::text as checkpoint_status,
+               analysis_summary, result_images, chat_turns_remaining, chat_turns_used,
+               chat_context, expires_at, created_at, updated_at
+        FROM consultations WHERE id = $1 AND user_id = $2"#,
     )
     .bind(consultation_id)
     .bind(auth.user_id)
@@ -297,32 +459,38 @@ pub async fn send_chat_message(
     Path(consultation_id): Path<Uuid>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatMessageResponse>, AppError> {
-    // Validate message length
-    if req.message.len() > 500 {
+    // Rate limiting: 30 messages per minute per user
+    let user_key = auth.user_id.to_string();
+    let allowed = state
+        .cache
+        .check_rate_limit_with_ip(Some(&user_key), &user_key, "chat", 30, 60)
+        .await?;
+    if !allowed {
+        return Err(AppError::RateLimitExceeded(
+            "Too many chat messages. Please slow down.".to_string(),
+        ));
+    }
+
+    // Validate message length (character count, not byte length — Korean = 3 bytes/char in UTF-8)
+    if req.message.chars().count() > 500 {
         return Err(AppError::BadRequest(
             "Message must be 500 characters or less".to_string(),
         ));
     }
 
-    // Acquire session lock (prevent concurrent messages)
-    let lock_acquired = state
+    // Acquire session lock (prevent concurrent messages, 120s TTL)
+    let lock_token = state
         .cache
         .acquire_session_lock(&consultation_id.to_string())
         .await?;
 
-    if !lock_acquired {
-        return Err(AppError::Conflict(
-            "Another message is being processed. Please wait.".to_string(),
-        ));
-    }
-
     // Execute the inner logic and always release the lock afterwards
     let result = send_chat_message_inner(&state, auth.user_id, consultation_id, &req).await;
 
-    // Release lock regardless of success/failure
+    // Release lock atomically (only if we still hold it)
     let _ = state
         .cache
-        .release_session_lock(&consultation_id.to_string())
+        .release_session_lock(&consultation_id.to_string(), &lock_token)
         .await;
 
     result
@@ -337,7 +505,11 @@ async fn send_chat_message_inner(
 ) -> Result<Json<ChatMessageResponse>, AppError> {
     // Fetch consultation
     let consultation = sqlx::query_as::<_, ConsultationRow>(
-        "SELECT * FROM consultations WHERE id = $1 AND user_id = $2",
+        r#"SELECT id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
+               status::text as status, checkpoint_status::text as checkpoint_status,
+               analysis_summary, result_images, chat_turns_remaining, chat_turns_used,
+               chat_context, expires_at, created_at, updated_at
+        FROM consultations WHERE id = $1 AND user_id = $2"#,
     )
     .bind(consultation_id)
     .bind(user_id)
@@ -371,21 +543,26 @@ async fn send_chat_message_inner(
         ));
     }
 
-    // Save user message
-    let user_msg_id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO chat_messages (id, consultation_id, role, content) VALUES ($1, $2, 'user', $3)",
+    // Check session cost limit before calling Claude
+    let session_cost_microdollars: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(token_count::bigint), 0) FROM chat_messages WHERE consultation_id = $1",
     )
-    .bind(user_msg_id)
     .bind(consultation_id)
-    .bind(&req.message)
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await?;
+    // token_count stores cost in microdollars (input_tokens * 15 + output_tokens * 75)
+    let session_cost_usd = session_cost_microdollars as f64 / 1_000_000.0;
+    if session_cost_usd >= state.config.claude_max_cost_per_session_usd {
+        return Err(AppError::BadRequest(
+            "상담 세션 비용 한도에 도달했습니다.".into(),
+        ));
+    }
 
-    // Build chat history (recent 20 turns)
+    // Build chat history from existing messages (before inserting user message)
     let history_rows = sqlx::query_as::<_, crate::models::consultation::ChatMessageRow>(
         r#"
-        SELECT * FROM chat_messages
+        SELECT id, consultation_id, role::text as role, content_enc, token_count, created_at
+        FROM chat_messages
         WHERE consultation_id = $1
         ORDER BY created_at DESC
         LIMIT 40
@@ -399,9 +576,11 @@ async fn send_chat_message_inner(
         .iter()
         .rev()
         .filter(|m| m.role != "system")
-        .map(|m| ClaudeMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
+        .filter_map(|m| {
+            state.crypto.decrypt(&m.content_enc).ok().map(|content| ClaudeMessage {
+                role: m.role.clone(),
+                content,
+            })
         })
         .collect();
 
@@ -410,28 +589,51 @@ async fn send_chat_message_inner(
         .as_deref()
         .unwrap_or("사주 분석 데이터 없음");
 
-    // Generate AI response
-    let ai_response = state
+    // Generate AI response (no user message committed yet — avoids dangling messages on failure)
+    let ai_response = match state
         .saju_interpreter
         .generate_chat_response(
             analysis_summary,
-            &chat_history[..chat_history.len().saturating_sub(1)], // exclude the just-added user message
+            &chat_history,
             &req.message,
             consultation.chat_turns_remaining,
         )
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::error!("Claude chat response failed for consultation {}: {}", consultation_id, e);
+            return Err(AppError::Internal(
+                "AI 응답 생성에 실패했습니다. 다시 시도해주세요.".into(),
+            ));
+        }
+    };
 
-    // Save AI message
+    // Use a transaction to commit user message, AI message, and turn update atomically
+    let mut tx = state.db.begin().await?;
+
+    let user_msg_id = Uuid::new_v4();
+    let user_content_enc = state.crypto.encrypt(&req.message)?;
+    sqlx::query(
+        "INSERT INTO chat_messages (id, consultation_id, role, content_enc) VALUES ($1, $2, 'user', $3)",
+    )
+    .bind(user_msg_id)
+    .bind(consultation_id)
+    .bind(&user_content_enc)
+    .execute(&mut *tx)
+    .await?;
+
     let ai_msg_id = Uuid::new_v4();
     let now = Utc::now();
+    let ai_content_enc = state.crypto.encrypt(&ai_response)?;
     sqlx::query(
-        "INSERT INTO chat_messages (id, consultation_id, role, content, created_at) VALUES ($1, $2, 'assistant', $3, $4)",
+        "INSERT INTO chat_messages (id, consultation_id, role, content_enc, created_at) VALUES ($1, $2, 'assistant', $3, $4)",
     )
     .bind(ai_msg_id)
     .bind(consultation_id)
-    .bind(&ai_response)
+    .bind(&ai_content_enc)
     .bind(now)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
 
     // Decrement turns
@@ -441,8 +643,11 @@ async fn send_chat_message_inner(
     )
     .bind(new_turns)
     .bind(consultation_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+
+    // Commit everything together — no dangling messages on partial failure
+    tx.commit().await?;
 
     Ok(Json(ChatMessageResponse {
         id: ai_msg_id,
@@ -453,11 +658,25 @@ async fn send_chat_message_inner(
     }))
 }
 
+
 /// POST /v1/saju/compatibility — Free compatibility preview
 pub async fn compatibility_preview(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CompatibilityRequest>,
 ) -> Result<Json<CompatibilityPreviewResponse>, AppError> {
+    // Rate limiting: 20 requests per hour per IP
+    let client_ip = crate::api::helpers::extract_client_ip(&headers);
+    let allowed = state
+        .cache
+        .check_rate_limit_with_ip(None, &client_ip, "compatibility", 20, 3600)
+        .await?;
+    if !allowed {
+        return Err(AppError::RateLimitExceeded(
+            "Too many compatibility requests. Please try again later.".to_string(),
+        ));
+    }
+
     // Calculate four pillars for both persons (L1)
     let fp1 = state.saju_engine.calculate_four_pillars(&req.person1)?;
     let fp2 = state.saju_engine.calculate_four_pillars(&req.person2)?;

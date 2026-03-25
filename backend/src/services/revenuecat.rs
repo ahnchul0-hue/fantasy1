@@ -12,8 +12,14 @@ pub struct RevenueCatClient {
 
 impl RevenueCatClient {
     pub fn new(api_key: String, webhook_secret: String) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             webhook_secret,
         }
@@ -99,20 +105,10 @@ impl RevenueCatClient {
         })
     }
 
-    /// Verify a webhook signature from RevenueCat.
-    pub fn verify_webhook_signature(&self, payload: &[u8], signature: &str) -> bool {
-        use hmac::{Hmac, Mac};
-        use sha2::Sha256;
-
-        type HmacSha256 = Hmac<Sha256>;
-
-        let Ok(mut mac) = HmacSha256::new_from_slice(self.webhook_secret.as_bytes()) else {
-            return false;
-        };
-        mac.update(payload);
-
-        let expected = hex::encode(mac.finalize().into_bytes());
-        expected == signature
+    /// Return the webhook secret for bearer token verification.
+    /// The webhook handler checks the Authorization header against this value.
+    pub fn webhook_secret(&self) -> &str {
+        &self.webhook_secret
     }
 }
 
@@ -149,9 +145,11 @@ pub struct RevenueCatWebhookEvent {
 
 #[derive(Debug, Deserialize)]
 pub struct RevenueCatEventData {
+    /// Unique event ID for deduplication
+    pub id: Option<String>,
     #[serde(rename = "type")]
     pub event_type: String,
     pub app_user_id: Option<String>,
     pub product_id: Option<String>,
-    pub store_transaction_id: Option<String>,
+    pub transaction_id: Option<String>,
 }

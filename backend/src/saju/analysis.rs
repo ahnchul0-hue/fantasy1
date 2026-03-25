@@ -3,10 +3,13 @@
 /// Performs: 오행 balance, 십신, 대운, consistency validation.
 /// All deterministic and rule-based. No AI.
 
+use chrono::NaiveDate;
+
 use crate::models::birth::{BirthInput, Gender};
 use crate::models::saju::*;
 use crate::saju::tables::{self, HEAVENLY_STEMS, EARTHLY_BRANCHES, Pillar};
-use crate::saju::tables::heavenly_stems::Element;
+use crate::saju::tables::heavenly_stems::{Element, Polarity};
+use crate::saju::tables::solar_terms::JIE_TERMS;
 
 pub struct SajuAnalyzer;
 
@@ -110,11 +113,11 @@ impl SajuAnalyzer {
 
     fn calculate_daeun(&self, fp: &FourPillars, input: &BirthInput) -> Vec<DaeunPeriod> {
         let year_stem = &HEAVENLY_STEMS[fp.year_stem as usize];
-        let is_yang = year_stem.polarity == crate::saju::tables::heavenly_stems::Polarity::Yang;
+        let is_yang = year_stem.polarity == Polarity::Yang;
         let is_male = input.gender == Gender::Male;
         let forward = (is_male && is_yang) || (!is_male && !is_yang);
 
-        let start_age = 4i32;
+        let start_age = calculate_daeun_start_age(input, forward);
         let mut periods = Vec::new();
 
         for i in 0..8i32 {
@@ -203,4 +206,62 @@ fn overcomes_elem(e: Element) -> Element {
         Element::Earth => Element::Water, Element::Metal => Element::Wood,
         Element::Water => Element::Fire,
     }
+}
+
+/// Calculate the 대운 start age based on the distance to the nearest 절 (Jie) term.
+///
+/// Rules:
+/// - If forward (male+yang or female+yin): count days to the NEXT 절
+/// - If backward (male+yin or female+yang): count days to the PREVIOUS 절
+/// - Days ÷ 3 = start age (rounded, minimum 1)
+fn calculate_daeun_start_age(input: &BirthInput, forward: bool) -> i32 {
+    let birth_date = match NaiveDate::from_ymd_opt(input.year, input.month, input.day) {
+        Some(d) => d,
+        None => return 4, // fallback for invalid dates
+    };
+    let birth_hour = input.birth_hour.to_representative_hour();
+
+    let target_term_date = if forward {
+        find_next_jeol_term_date(birth_date, birth_hour)
+    } else {
+        find_previous_jeol_term_date(birth_date, birth_hour)
+    };
+
+    let days_diff = match target_term_date {
+        Some(term_date) => (term_date - birth_date).num_days().unsigned_abs() as u32,
+        None => 12, // fallback: ~4 years (12/3=4) when outside table range
+    };
+
+    let start_age = ((days_diff + 1) / 3) as i32; // round by adding 1 before dividing
+    start_age.max(1) // minimum 1 year
+}
+
+/// Find the next 절 (Jie) term date after the given birth date+hour.
+/// Returns `None` if the date is outside the JIE_TERMS table range.
+fn find_next_jeol_term_date(birth_date: NaiveDate, birth_hour: u8) -> Option<NaiveDate> {
+    for &(y, m, d, h, _min, _term_idx) in JIE_TERMS.iter() {
+        let term_date = NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32)?;
+        if term_date > birth_date || (term_date == birth_date && h > birth_hour) {
+            return Some(term_date);
+        }
+    }
+    None
+}
+
+/// Find the previous 절 (Jie) term date before the given birth date+hour.
+/// Returns `None` if the date is outside the JIE_TERMS table range.
+fn find_previous_jeol_term_date(birth_date: NaiveDate, birth_hour: u8) -> Option<NaiveDate> {
+    let mut result: Option<NaiveDate> = None;
+    for &(y, m, d, h, _min, _term_idx) in JIE_TERMS.iter() {
+        let term_date = match NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32) {
+            Some(td) => td,
+            None => continue,
+        };
+        if term_date < birth_date || (term_date == birth_date && h <= birth_hour) {
+            result = Some(term_date);
+        } else {
+            break; // JIE_TERMS is sorted chronologically
+        }
+    }
+    result
 }

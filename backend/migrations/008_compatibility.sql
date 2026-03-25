@@ -1,12 +1,13 @@
 -- Migration 008: Compatibility results cache
 -- Caches compatibility scores between two birth profiles
+-- Birth data is encrypted (BYTEA) consistent with other tables
 
 CREATE TABLE IF NOT EXISTS compatibility_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pair_hash VARCHAR(64) NOT NULL,
-    -- SHA-256 of sorted(person1_birth_hash, person2_birth_hash) for order-independent lookup
-    person1_birth_data JSONB NOT NULL,
-    person2_birth_data JSONB NOT NULL,
+    -- HMAC of sorted(person1_birth_hmac, person2_birth_hmac) for order-independent lookup
+    person1_birth_enc BYTEA NOT NULL,
+    person2_birth_enc BYTEA NOT NULL,
     score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
     summary TEXT NOT NULL,
     person1_element VARCHAR(20) NOT NULL,

@@ -24,8 +24,12 @@ CREATE TABLE IF NOT EXISTS consultations (
     checkpoint_status checkpoint_status NOT NULL DEFAULT 'none',
     analysis_summary TEXT,
     result_images JSONB NOT NULL DEFAULT '[]'::jsonb,
-    chat_turns_remaining INTEGER NOT NULL DEFAULT 50,
-    chat_turns_used INTEGER NOT NULL DEFAULT 0,
+    consultation_type VARCHAR(30) NOT NULL DEFAULT 'saju_consultation'
+        CHECK (consultation_type IN ('saju_consultation', 'compatibility_consultation')),
+    chat_turns_remaining INTEGER NOT NULL DEFAULT 50
+        CHECK (chat_turns_remaining >= 0),
+    chat_turns_used INTEGER NOT NULL DEFAULT 0
+        CHECK (chat_turns_used >= 0),
     chat_context JSONB NOT NULL DEFAULT '{}'::jsonb,
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '72 hours'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -119,6 +119,12 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "".to_string());
     let rc_webhook_secret = std::env::var("REVENUECAT_WEBHOOK_SECRET")
         .unwrap_or_else(|_| "".to_string());
+    if rc_webhook_secret.is_empty() {
+        tracing::warn!(
+            "REVENUECAT_WEBHOOK_SECRET is not set — all webhook requests will be rejected. \
+            Set this in production to process RevenueCat webhooks."
+        );
+    }
     let revenuecat = Arc::new(RevenueCatClient::new(rc_api_key, rc_webhook_secret));
 
     // Saju engine components
@@ -215,9 +221,17 @@ fn api_routes(state: AppState) -> Router<AppState> {
     let public_routes = Router::new()
         .route("/auth/login", post(api::auth::login))
         .route("/auth/refresh", post(api::auth::refresh))
-        .route("/saju/card", post(api::saju::create_card))
+        .route("/saju/card/{id}", get(api::saju::get_card))
         .route("/saju/compatibility", post(api::saju::compatibility_preview))
         .route("/payment/webhook", post(api::payment::revenuecat_webhook));
+
+    // Optional auth routes (works with or without token)
+    let optional_auth_routes = Router::new()
+        .route("/saju/card", post(api::saju::create_card))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::optional_auth_middleware,
+        ));
 
     // Protected routes (auth required)
     let protected_routes = Router::new()
@@ -241,5 +255,6 @@ fn api_routes(state: AppState) -> Router<AppState> {
 
     Router::new()
         .merge(public_routes)
+        .merge(optional_auth_routes)
         .merge(protected_routes)
 }

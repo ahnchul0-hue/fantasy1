@@ -12,8 +12,14 @@ pub struct NanoBananaClient {
 
 impl NanoBananaClient {
     pub fn new(api_key: String, base_url: String) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             base_url,
         }

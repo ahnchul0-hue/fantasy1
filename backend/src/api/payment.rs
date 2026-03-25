@@ -1,5 +1,6 @@
-use axum::{extract::State, Json};
+use axum::{extract::State, http::HeaderMap, Json};
 
+use crate::api::helpers::extract_client_ip;
 use crate::auth::middleware::AuthUser;
 use crate::errors::AppError;
 use crate::models::payment::*;
@@ -8,9 +9,22 @@ use crate::state::AppState;
 /// POST /v1/payment/verify — Verify IAP receipt (can also be triggered by RevenueCat webhook)
 pub async fn verify_payment(
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Extension(auth): axum::Extension<AuthUser>,
     Json(req): Json<PaymentVerificationRequest>,
 ) -> Result<Json<PaymentVerificationResponse>, AppError> {
+    // Rate limiting: 10 requests per minute per IP
+    let client_ip = extract_client_ip(&headers);
+    let allowed = state
+        .cache
+        .check_rate_limit_with_ip(None, &client_ip, "payment_verify", 10, 60)
+        .await?;
+    if !allowed {
+        return Err(AppError::RateLimitExceeded(
+            "Too many payment verification attempts. Please try again later.".to_string(),
+        ));
+    }
+
     // Validate product_id
     let valid_products = [
         "saju_consultation_15000",
@@ -45,6 +59,44 @@ pub async fn verify_payment(
                 "Receipt already used by another user".to_string(),
             ));
         }
+
+        // If order is still pending, re-verify with RevenueCat instead of just returning
+        if existing.status == "pending" {
+            let verification = state
+                .revenuecat
+                .verify_receipt(&existing.receipt_id, &existing.product_id, &existing.platform)
+                .await;
+
+            match verification {
+                Ok(result) if result.valid => {
+                    sqlx::query(
+                        "UPDATE orders SET status = 'verified', verified_at = NOW() WHERE id = $1",
+                    )
+                    .bind(existing.id)
+                    .execute(&state.db)
+                    .await?;
+
+                    tracing::info!(
+                        order_id = %existing.id,
+                        user_id = %auth.user_id,
+                        "Pending order re-verified successfully"
+                    );
+
+                    return Ok(Json(PaymentVerificationResponse {
+                        verified: true,
+                        order_id: Some(existing.id),
+                    }));
+                }
+                Ok(_) | Err(_) => {
+                    // Re-verification failed or inconclusive — return pending so client can retry
+                    return Ok(Json(PaymentVerificationResponse {
+                        verified: false,
+                        order_id: Some(existing.id),
+                    }));
+                }
+            }
+        }
+
         return Ok(Json(PaymentVerificationResponse {
             verified: existing.status == "verified",
             order_id: Some(existing.id),
@@ -59,10 +111,11 @@ pub async fn verify_payment(
         _ => 0,
     };
 
-    sqlx::query(
+    let rows = sqlx::query(
         r#"
         INSERT INTO orders (id, user_id, receipt_id, product_id, platform, status, amount_krw)
         VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+        ON CONFLICT (receipt_id) DO NOTHING
         "#,
     )
     .bind(order_id)
@@ -73,6 +126,26 @@ pub async fn verify_payment(
     .bind(amount)
     .execute(&state.db)
     .await?;
+
+    // Race condition: another request inserted this receipt concurrently
+    if rows.rows_affected() == 0 {
+        let existing = sqlx::query_as::<_, OrderRow>(
+            "SELECT * FROM orders WHERE receipt_id = $1",
+        )
+        .bind(&req.receipt_id)
+        .fetch_one(&state.db)
+        .await?;
+
+        if existing.user_id != auth.user_id {
+            return Err(AppError::BadRequest(
+                "Receipt already used by another user".to_string(),
+            ));
+        }
+        return Ok(Json(PaymentVerificationResponse {
+            verified: existing.status == "verified",
+            order_id: Some(existing.id),
+        }));
+    }
 
     // Verify with RevenueCat
     let verification = state
@@ -144,15 +217,18 @@ pub async fn revenuecat_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<axum::http::StatusCode, AppError> {
-    // Verify webhook signature
-    let signature = headers
-        .get("X-RevenueCat-Signature")
+    // Verify webhook authorization (Bearer token configured in RevenueCat dashboard)
+    let auth_header = headers
+        .get("Authorization")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .ok_or(AppError::Unauthorized(
+            "Missing webhook authorization".to_string(),
+        ))?;
 
-    if !state.revenuecat.verify_webhook_signature(&body, signature) {
+    let expected = format!("Bearer {}", state.revenuecat.webhook_secret());
+    if state.revenuecat.webhook_secret().is_empty() || auth_header != expected {
         return Err(AppError::Unauthorized(
-            "Invalid webhook signature".to_string(),
+            "Invalid webhook token".to_string(),
         ));
     }
 
@@ -160,14 +236,37 @@ pub async fn revenuecat_webhook(
         serde_json::from_slice(&body)
             .map_err(|e| AppError::BadRequest(format!("Invalid webhook payload: {}", e)))?;
 
+    // Use event.id for deduplication logging
+    let event_id = event.event.id.as_deref().unwrap_or("unknown");
+
     match event.event.event_type.as_str() {
         "NON_RENEWING_PURCHASE" => {
-            // New purchase confirmed - handled by verify_payment
-            tracing::info!("RevenueCat webhook: purchase confirmed");
+            // Promote pending orders to verified (handles recovery for failed verify_payment calls)
+            if let Some(transaction_id) = &event.event.transaction_id {
+                let result = sqlx::query(
+                    "UPDATE orders SET status = 'verified', verified_at = NOW() WHERE receipt_id = $1 AND status = 'pending'",
+                )
+                .bind(transaction_id)
+                .execute(&state.db)
+                .await?;
+
+                if result.rows_affected() > 0 {
+                    tracing::info!(
+                        transaction_id = %transaction_id,
+                        event_id = %event_id,
+                        "Pending order promoted to verified via webhook"
+                    );
+                } else {
+                    tracing::info!(
+                        event_id = %event_id,
+                        "RevenueCat webhook: purchase confirmed (no pending order to promote)"
+                    );
+                }
+            }
         }
         "CANCELLATION" | "REFUND" => {
             // Handle refund
-            if let Some(transaction_id) = &event.event.store_transaction_id {
+            if let Some(transaction_id) = &event.event.transaction_id {
                 sqlx::query(
                     "UPDATE orders SET status = 'refunded', refunded_at = NOW() WHERE receipt_id = $1",
                 )
@@ -188,12 +287,16 @@ pub async fn revenuecat_webhook(
 
                 tracing::info!(
                     transaction_id = %transaction_id,
+                    event_id = %event_id,
                     "Refund processed - consultation deactivated"
                 );
             }
         }
         _ => {
-            tracing::debug!("RevenueCat webhook: unhandled event type: {}", event.event.event_type);
+            tracing::debug!(
+                event_id = %event_id,
+                "RevenueCat webhook: unhandled event type: {}", event.event.event_type
+            );
         }
     }
 
