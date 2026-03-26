@@ -206,12 +206,20 @@ export default function BirthInputForm({
         <legend className="block text-sm font-medium text-on-surface mb-2">
           성별
         </legend>
-        <div className="flex gap-3" role="radiogroup" aria-label="성별 선택">
+        <div className="flex gap-3" role="radiogroup" aria-label="성별 선택" aria-required="true" aria-describedby={errors.gender ? "error-gender" : undefined}>
           <button
             type="button"
             role="radio"
             aria-checked={gender === "male"}
+            tabIndex={gender === "male" || gender === "" ? 0 : -1}
             onClick={() => setGender("male")}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                setGender("female");
+                (e.currentTarget.nextElementSibling as HTMLElement)?.focus();
+              }
+            }}
             className={`flex-1 h-12 rounded-button border text-sm font-medium transition-all duration-300 ${
               gender === "male"
                 ? "border-accent bg-accent/10 text-accent"
@@ -224,7 +232,15 @@ export default function BirthInputForm({
             type="button"
             role="radio"
             aria-checked={gender === "female"}
+            tabIndex={gender === "female" ? 0 : -1}
             onClick={() => setGender("female")}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setGender("male");
+                (e.currentTarget.previousElementSibling as HTMLElement)?.focus();
+              }
+            }}
             className={`flex-1 h-12 rounded-button border text-sm font-medium transition-all duration-300 ${
               gender === "female"
                 ? "border-accent bg-accent/10 text-accent"

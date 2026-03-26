@@ -6,7 +6,7 @@
 use crate::errors::AppError;
 use crate::models::saju::SajuAnalysis;
 use crate::saju::tables::{HEAVENLY_STEMS, EARTHLY_BRANCHES};
-use crate::services::claude::{ClaudeClient, ClaudeMessage};
+use crate::services::claude::{ClaudeClient, ClaudeMessage, LlmResponse};
 
 pub struct SajuInterpreter {
     claude_client: ClaudeClient,
@@ -41,10 +41,22 @@ impl SajuInterpreter {
         user_message: &str,
         turns_remaining: i32,
     ) -> Result<String, AppError> {
+        let resp = self.generate_chat_response_with_usage(analysis_summary, chat_history, user_message, turns_remaining).await?;
+        Ok(resp.text)
+    }
+
+    /// Generate a chat response and return usage info for cost tracking.
+    pub async fn generate_chat_response_with_usage(
+        &self,
+        analysis_summary: &str,
+        chat_history: &[ClaudeMessage],
+        user_message: &str,
+        turns_remaining: i32,
+    ) -> Result<LlmResponse, AppError> {
         let system_prompt = self.build_chat_system_prompt(analysis_summary, turns_remaining);
         let mut messages = chat_history.to_vec();
         messages.push(ClaudeMessage { role: "user".to_string(), content: user_message.to_string() });
-        self.claude_client.send_message(&system_prompt, &messages, self.max_tokens_per_message).await
+        self.claude_client.send_message_with_usage(&system_prompt, &messages, self.max_tokens_per_message).await
     }
 
     fn build_system_prompt(&self) -> String {

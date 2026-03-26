@@ -1,36 +1,69 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BACKEND_URL } from "@/lib/constants";
 
-const API_BASE = process.env.API_URL || "https://api.saju.app/v1";
+const VALID_HOURS = [
+  "ja", "chuk", "in", "myo", "jin", "sa",
+  "o", "mi", "sin", "yu", "sul", "hae", "unknown",
+] as const;
 
-/** Validate BirthInput shape before forwarding to backend. */
-function validateBirthInput(
+/** Validate and sanitize BirthInput, returning a strict whitelist payload or an error message. */
+function validateAndSanitize(
   body: unknown
-): body is {
+): { ok: true; data: SanitizedBirthInput } | { ok: false; error: string } {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid JSON body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const year = Number(b.year);
+  const month = Number(b.month);
+  const day = Number(b.day);
+  const gender = b.gender;
+  const calendarType = b.calendar_type;
+  const birthHour = b.birth_hour;
+  const isLeapMonth = Boolean(b.is_leap_month);
+
+  if (!Number.isInteger(year) || year < 1920 || year > new Date().getFullYear()) {
+    return { ok: false, error: "유효하지 않은 연도입니다" };
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return { ok: false, error: "유효하지 않은 월입니다" };
+  }
+  if (!Number.isInteger(day) || day < 1 || day > 31) {
+    return { ok: false, error: "유효하지 않은 일입니다" };
+  }
+  if (!["male", "female"].includes(gender as string)) {
+    return { ok: false, error: "유효하지 않은 성별입니다" };
+  }
+  if (!["solar", "lunar"].includes(calendarType as string)) {
+    return { ok: false, error: "유효하지 않은 달력 유형입니다" };
+  }
+  if (!VALID_HOURS.includes(birthHour as typeof VALID_HOURS[number])) {
+    return { ok: false, error: "유효하지 않은 시진입니다" };
+  }
+
+  return {
+    ok: true,
+    data: {
+      year,
+      month,
+      day,
+      gender: gender as "male" | "female",
+      calendar_type: calendarType as "solar" | "lunar",
+      birth_hour: birthHour as string,
+      is_leap_month: isLeapMonth,
+    },
+  };
+}
+
+interface SanitizedBirthInput {
   year: number;
   month: number;
   day: number;
+  gender: "male" | "female";
+  calendar_type: "solar" | "lunar";
   birth_hour: string;
-  gender: string;
-  calendar_type: string;
-} {
-  if (typeof body !== "object" || body === null) return false;
-  const b = body as Record<string, unknown>;
-  return (
-    typeof b.year === "number" &&
-    b.year >= 1900 &&
-    b.year <= 2100 &&
-    typeof b.month === "number" &&
-    b.month >= 1 &&
-    b.month <= 12 &&
-    typeof b.day === "number" &&
-    b.day >= 1 &&
-    b.day <= 31 &&
-    typeof b.birth_hour === "string" &&
-    typeof b.gender === "string" &&
-    ["male", "female"].includes(b.gender) &&
-    typeof b.calendar_type === "string" &&
-    ["solar", "lunar"].includes(b.calendar_type)
-  );
+  is_leap_month: boolean;
 }
 
 /**
@@ -40,9 +73,9 @@ function validateBirthInput(
  */
 export async function POST(request: NextRequest) {
   try {
-    let body: unknown;
+    let rawBody: unknown;
     try {
-      body = await request.json();
+      rawBody = await request.json();
     } catch {
       return NextResponse.json(
         { error: "Invalid JSON body" },
@@ -50,12 +83,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!validateBirthInput(body)) {
+    const validation = validateAndSanitize(rawBody);
+    if (!validation.ok) {
       return NextResponse.json(
-        { error: "Invalid birth input" },
+        { error: validation.error },
         { status: 400 }
       );
     }
+    const sanitizedBody = validation.data;
 
     // Forward auth header if present (for optional profile save)
     const headers: Record<string, string> = {
@@ -66,10 +101,10 @@ export async function POST(request: NextRequest) {
       headers["Authorization"] = authHeader;
     }
 
-    const response = await fetch(`${API_BASE}/saju/card`, {
+    const response = await fetch(`${BACKEND_URL}/saju/card`, {
       method: "POST",
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify(sanitizedBody),
     });
 
     if (!response.ok) {

@@ -2,7 +2,9 @@
  * API client for the Saju backend (Rust/Axum at api.saju.app/v1)
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.saju.app/v1";
+import { API_URL } from "@/lib/constants";
+
+const API_BASE = API_URL;
 
 /** Birth input for saju card generation */
 export interface BirthInput {
@@ -56,6 +58,20 @@ export interface Pillar {
   earthly_branch: string;
   heavenly_stem_hanja: string;
   earthly_branch_hanja: string;
+}
+
+/** Runtime validation for SajuCard data from the backend */
+export function validateSajuCard(data: unknown): SajuCard | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+
+  if (typeof d.id !== "string") return null;
+  if (typeof d.ilju_name !== "string") return null;
+  if (typeof d.ilju_hanja !== "string") return null;
+  if (!Array.isArray(d.keywords)) return null;
+  if (typeof d.lucky_element !== "string") return null;
+
+  return data as SajuCard;
 }
 
 class ApiClient {

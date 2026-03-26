@@ -239,10 +239,8 @@ impl SocialAuthVerifier for GoogleVerifier {
     async fn verify(&self, token: &str) -> Result<SocialUser, AppError> {
         let resp = self
             .client
-            .get(format!(
-                "https://oauth2.googleapis.com/tokeninfo?id_token={}",
-                token
-            ))
+            .post("https://oauth2.googleapis.com/tokeninfo")
+            .form(&[("id_token", token)])
             .send()
             .await
             .map_err(|e| AppError::ExternalService(format!("Google API error: {}", e)))?;

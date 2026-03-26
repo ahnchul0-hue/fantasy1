@@ -67,8 +67,9 @@ export const metadata: Metadata = {
   },
   verification: {
     other: {
-      /** TODO: 네이버 웹마스터 도구에서 인증 코드 발급 후 교체 */
-      "naver-site-verification": "NAVER_VERIFICATION_CODE",
+      ...(process.env.NAVER_SITE_VERIFICATION
+        ? { "naver-site-verification": process.env.NAVER_SITE_VERIFICATION }
+        : {}),
     },
   },
 };
@@ -119,6 +120,7 @@ export default function RootLayout({
     <html lang="ko">
       <head>
         {/* Pretendard Variable */}
+        <link rel="preconnect" href="https://cdn.jsdelivr.net" crossOrigin="anonymous" />
         <link
           rel="stylesheet"
           as="style"

@@ -48,7 +48,7 @@ pub async fn login(
         r#"
         INSERT INTO users (provider, provider_user_id, nickname)
         VALUES ($1, $2, $3)
-        ON CONFLICT ON CONSTRAINT uq_users_active_provider DO UPDATE
+        ON CONFLICT (provider, provider_user_id) WHERE deleted_at IS NULL DO UPDATE
             SET updated_at = NOW()
         RETURNING *
         "#,

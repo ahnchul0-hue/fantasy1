@@ -52,15 +52,23 @@ pub async fn auth_middleware(
     };
 
     // Verify user exists and is not soft-deleted
-    let is_active: bool = sqlx::query_scalar(
+    let is_active = match sqlx::query_scalar::<_, bool>(
         "SELECT deleted_at IS NULL FROM users WHERE id = $1",
     )
     .bind(user_id)
     .fetch_optional(&state.db)
     .await
-    .ok()
-    .flatten()
-    .unwrap_or(false);
+    {
+        Ok(Some(active)) => active,
+        Ok(None) => return auth_error_response("Account not found or has been deleted"),
+        Err(e) => {
+            tracing::error!(error = %e, "Database error in auth middleware");
+            let body = serde_json::json!({
+                "error": { "type": "internal", "message": "Internal server error" }
+            });
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+        }
+    };
 
     if !is_active {
         return auth_error_response("Account not found or has been deleted");
@@ -93,18 +101,21 @@ pub async fn optional_auth_middleware(
             if let Ok(claims) = state.jwt.validate_access_token(token) {
                 if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
                     // Only set auth extension if user is active
-                    let is_active: bool = sqlx::query_scalar(
+                    match sqlx::query_scalar::<_, bool>(
                         "SELECT deleted_at IS NULL FROM users WHERE id = $1",
                     )
                     .bind(user_id)
                     .fetch_optional(&state.db)
                     .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or(false);
-
-                    if is_active {
-                        request.extensions_mut().insert(AuthUser { user_id });
+                    {
+                        Ok(Some(true)) => {
+                            request.extensions_mut().insert(AuthUser { user_id });
+                        }
+                        Ok(_) => {} // User not found or deleted — continue as anonymous
+                        Err(e) => {
+                            tracing::error!(error = %e, "Database error in optional auth middleware");
+                            // Continue as anonymous rather than failing the request
+                        }
                     }
                 }
             }

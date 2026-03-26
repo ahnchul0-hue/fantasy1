@@ -12,23 +12,27 @@ const ALLOWED_IMAGE_HOSTS = ["cdn.saju.app", "api.saju.app"];
 
 function isSafeImageUrl(url: string): boolean {
   try {
-    const { hostname } = new URL(url);
-    return ALLOWED_IMAGE_HOSTS.includes(hostname);
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && ALLOWED_IMAGE_HOSTS.includes(parsed.hostname);
   } catch {
     return false;
   }
 }
 
 async function getCard(id: string): Promise<SajuCard | null> {
-  try {
-    const res = await fetch(`${API_BASE}/saju/card/${id}`, {
-      next: { revalidate: 3600 },
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+  const res = await fetch(`${API_BASE}/saju/card/${id}`, {
+    next: { revalidate: 3600 },
+  });
+
+  if (res.status === 404) {
+    return null; // Card genuinely not found
   }
+
+  if (!res.ok) {
+    throw new Error(`Backend error: ${res.status}`);
+  }
+
+  return res.json();
 }
 
 interface PageProps {
@@ -48,8 +52,10 @@ export async function generateMetadata({
   }
 
   const title = `${card.ilju_name} (${card.ilju_hanja}) 사주 카드`;
-  const description = `나의 사주: ${card.ilju_name} - ${card.keywords.join(", ")}. AI 사주 분석으로 만든 나만의 사주 카드를 확인하세요.`;
-  const ogImage = card.image_url || `${SITE_URL}/og-default.png`;
+  const description = `나의 사주: ${card.ilju_name} - ${(card.keywords ?? []).join(", ")}. AI 사주 분석으로 만든 나만의 사주 카드를 확인하세요.`;
+  const ogImage = card.image_url && isSafeImageUrl(card.image_url)
+    ? card.image_url
+    : `${SITE_URL}/og-default.png`;
 
   return {
     title,
@@ -96,7 +102,7 @@ export default async function SharedCardPage({ params }: PageProps) {
     "@context": "https://schema.org",
     "@type": "CreativeWork",
     name: `${card.ilju_name} 사주 카드`,
-    description: `${card.ilju_name} (${card.ilju_hanja}) - ${card.keywords.join(", ")}`,
+    description: `${card.ilju_name} (${card.ilju_hanja}) - ${(card.keywords ?? []).join(", ")}`,
     url: `${SITE_URL}/card/${id}`,
     image: card.image_url,
     creator: {
@@ -175,7 +181,7 @@ export default async function SharedCardPage({ params }: PageProps) {
 
               {/* Keywords */}
               <div className="flex flex-wrap justify-center gap-2">
-                {card.keywords.map((keyword) => (
+                {(card.keywords ?? []).map((keyword) => (
                   <span
                     key={keyword}
                     className="px-3 py-1.5 rounded-full text-sm font-medium"

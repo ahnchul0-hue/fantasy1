@@ -64,7 +64,7 @@ pub async fn verify_payment(
         if existing.status == "pending" {
             let verification = state
                 .revenuecat
-                .verify_receipt(&existing.receipt_id, &existing.product_id, &existing.platform)
+                .verify_receipt(&existing.receipt_id, &existing.product_id, &existing.platform, Some(&auth.user_id.to_string()))
                 .await;
 
             match verification {
@@ -147,10 +147,10 @@ pub async fn verify_payment(
         }));
     }
 
-    // Verify with RevenueCat
+    // Verify with RevenueCat (pass user_id for ownership check)
     let verification = state
         .revenuecat
-        .verify_receipt(&req.receipt_id, &req.product_id, &req.platform)
+        .verify_receipt(&req.receipt_id, &req.product_id, &req.platform, Some(&auth.user_id.to_string()))
         .await;
 
     match verification {

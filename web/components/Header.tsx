@@ -36,7 +36,7 @@ export default function Header() {
           >
             오늘의 운세
           </Link>
-          <AppDownloadButton />
+          {APP_STORE_URL && <AppDownloadButton />}
         </nav>
 
         {/* Mobile menu button */}
@@ -88,24 +88,30 @@ export default function Header() {
             >
               오늘의 운세
             </Link>
-            <div className="flex gap-2 pt-2">
-              <a
-                href={APP_STORE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="cta-primary flex-1 text-sm"
-              >
-                App Store
-              </a>
-              <a
-                href={PLAY_STORE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="cta-secondary flex-1 text-sm text-center"
-              >
-                Google Play
-              </a>
-            </div>
+            {(APP_STORE_URL || PLAY_STORE_URL) && (
+              <div className="flex gap-2 pt-2">
+                {APP_STORE_URL && (
+                  <a
+                    href={APP_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cta-primary flex-1 text-sm"
+                  >
+                    App Store
+                  </a>
+                )}
+                {PLAY_STORE_URL && (
+                  <a
+                    href={PLAY_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cta-secondary flex-1 text-sm text-center"
+                  >
+                    Google Play
+                  </a>
+                )}
+              </div>
+            )}
           </nav>
         </div>
       )}

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const API_BASE = process.env.API_URL || "https://api.saju.app/v1";
+import { BACKEND_URL } from "@/lib/constants";
 
 /**
  * GET /api/fortune/daily
@@ -27,14 +26,15 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=7200",
+          "Vary": "Authorization",
+          "Cache-Control": "public, max-age=3600, s-maxage=86400",
         },
       }
     );
   }
 
   try {
-    const response = await fetch(`${API_BASE}/fortune/daily`, {
+    const response = await fetch(`${BACKEND_URL}/fortune/daily`, {
       headers: {
         Authorization: authHeader,
       },
@@ -44,7 +44,13 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       return NextResponse.json(
         { error: "Failed to fetch daily fortune" },
-        { status: response.status }
+        {
+          status: response.status,
+          headers: {
+            "Vary": "Authorization",
+            "Cache-Control": "private, no-store",
+          },
+        }
       );
     }
 
@@ -54,16 +60,33 @@ export async function GET(request: NextRequest) {
     } catch {
       return NextResponse.json(
         { error: "Invalid response from fortune service" },
-        { status: 502 }
+        {
+          status: 502,
+          headers: {
+            "Vary": "Authorization",
+            "Cache-Control": "private, no-store",
+          },
+        }
       );
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: {
+        "Vary": "Authorization",
+        "Cache-Control": "private, no-store",
+      },
+    });
   } catch (error) {
     console.error("Daily fortune API error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Vary": "Authorization",
+          "Cache-Control": "private, no-store",
+        },
+      }
     );
   }
 }

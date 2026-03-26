@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://saju.app";
+import { SITE_URL } from "@/lib/constants";
 const SITE_NAME = "사주 - AI 사주 상담";
 
 export function createMetadata(options: {

@@ -18,9 +18,14 @@ const VERSIONED_MAGIC: u8 = b'v';
 const CURRENT_KEY_VERSION: u8 = 1;
 
 /// Cryptographic service for PII encryption and HMAC cache key generation.
+/// Supports key rotation: new data is encrypted with the current key, but
+/// decryption tries the versioned key first, then falls back to older keys.
 #[derive(Clone)]
 pub struct CryptoService {
+    /// Current encryption key (used for new encryptions)
     encryption_key: Vec<u8>,
+    /// Keyring: version → key (for decrypting data encrypted with older keys)
+    keyring: std::collections::HashMap<u8, Vec<u8>>,
     hmac_secret: Vec<u8>,
 }
 
@@ -36,10 +41,27 @@ impl CryptoService {
             ));
         }
 
+        let mut keyring = std::collections::HashMap::new();
+        keyring.insert(CURRENT_KEY_VERSION, encryption_key.clone());
+
         Ok(Self {
             encryption_key,
+            keyring,
             hmac_secret: hmac_secret.as_bytes().to_vec(),
         })
+    }
+
+    /// Register a previous encryption key for decryption of old data.
+    /// Call this for each old key version when rotating keys.
+    pub fn add_old_key(&mut self, version: u8, key_hex: &str) -> Result<(), AppError> {
+        let key = hex::decode(key_hex).map_err(|e| {
+            AppError::Internal(format!("Invalid old key hex: {}", e))
+        })?;
+        if key.len() != 32 {
+            return Err(AppError::Internal("Old key must be 32 bytes".to_string()));
+        }
+        self.keyring.insert(version, key);
+        Ok(())
     }
 
     /// Encrypt a plaintext value using AES-256-GCM.
@@ -82,19 +104,28 @@ impl CryptoService {
             let version = encrypted[1];
             let payload = &encrypted[2..];
 
-            if version == CURRENT_KEY_VERSION && payload.len() >= 28 {
-                let (nonce_bytes, ciphertext) = payload.split_at(12);
-                let nonce = Nonce::from_slice(nonce_bytes);
-                match cipher.decrypt(nonce, ciphertext) {
-                    Ok(plaintext) => {
-                        return String::from_utf8(plaintext)
-                            .map_err(|e| AppError::Internal(format!("UTF-8 decode error: {}", e)));
+            if payload.len() >= 28 {
+                // Look up the key for this version from the keyring
+                if let Some(key) = self.keyring.get(&version) {
+                    if let Ok(ver_cipher) = Aes256Gcm::new_from_slice(key) {
+                        let (nonce_bytes, ciphertext) = payload.split_at(12);
+                        let nonce = Nonce::from_slice(nonce_bytes);
+                        match ver_cipher.decrypt(nonce, ciphertext) {
+                            Ok(plaintext) => {
+                                return String::from_utf8(plaintext)
+                                    .map_err(|e| AppError::Internal(format!("UTF-8 decode error: {}", e)));
+                            }
+                            Err(_) => {
+                                // Versioned decryption failed — first nonce byte may coincidentally
+                                // be 'v'. Fall through to legacy decryption.
+                                tracing::debug!("Versioned decryption failed (v{}), trying legacy format", version);
+                            }
+                        }
+                    } else {
+                        tracing::warn!("Unknown key version {} in encrypted data", version);
                     }
-                    Err(_) => {
-                        // Versioned decryption failed — first nonce byte may coincidentally
-                        // be 'v'. Fall through to legacy decryption.
-                        tracing::debug!("Versioned decryption failed, trying legacy format");
-                    }
+                } else {
+                    tracing::warn!("No key found for version {} in keyring", version);
                 }
             }
             // Fall through: try legacy in case first nonce byte happened to be 'v'

@@ -27,11 +27,13 @@ impl RevenueCatClient {
 
     /// Verify a purchase receipt with RevenueCat.
     /// Returns the verified product_id and whether the purchase is valid.
+    /// `expected_app_user_id` ensures the purchase belongs to the requesting user.
     pub async fn verify_receipt(
         &self,
         receipt_id: &str,
         product_id: &str,
         platform: &str,
+        expected_app_user_id: Option<&str>,
     ) -> Result<ReceiptVerificationResult, AppError> {
         // RevenueCat REST API: GET /v1/receipts/{receipt_id}
         // or POST /v1/receipts to validate
@@ -74,6 +76,24 @@ impl RevenueCatClient {
         let resp: RevenueCatResponse = response.json().await.map_err(|e| {
             AppError::ExternalService(format!("RevenueCat response parse error: {}", e))
         })?;
+
+        // Verify app_user_id ownership if provided
+        if let Some(expected_uid) = expected_app_user_id {
+            let resp_app_user_id = resp
+                .subscriber
+                .as_ref()
+                .and_then(|s| s.original_app_user_id.as_deref());
+            if let Some(actual_uid) = resp_app_user_id {
+                if actual_uid != expected_uid {
+                    return Ok(ReceiptVerificationResult {
+                        valid: false,
+                        product_id: None,
+                        purchase_date: None,
+                        error: Some("Purchase does not belong to this user".to_string()),
+                    });
+                }
+            }
+        }
 
         // Validate the purchase
         let is_valid = resp
@@ -127,6 +147,7 @@ struct RevenueCatResponse {
 
 #[derive(Deserialize)]
 struct RevenueCatSubscriber {
+    original_app_user_id: Option<String>,
     non_subscriptions: Option<std::collections::HashMap<String, Vec<RevenueCatPurchase>>>,
 }
 

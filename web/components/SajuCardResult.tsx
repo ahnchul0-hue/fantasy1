@@ -10,8 +10,8 @@ const ALLOWED_IMAGE_HOSTS = ["cdn.saju.app", "api.saju.app"];
 
 function isSafeImageUrl(url: string): boolean {
   try {
-    const { hostname } = new URL(url);
-    return ALLOWED_IMAGE_HOSTS.includes(hostname);
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && ALLOWED_IMAGE_HOSTS.includes(parsed.hostname);
   } catch {
     return false;
   }
@@ -40,7 +40,7 @@ export default function SajuCardResult({ card }: SajuCardResultProps) {
       try {
         await navigator.share({
           title: `${card.ilju_name} 사주 카드`,
-          text: `나의 사주: ${card.ilju_name} (${card.ilju_hanja}) - ${card.keywords.join(", ")}`,
+          text: `나의 사주: ${card.ilju_name} (${card.ilju_hanja}) - ${(card.keywords ?? []).join(", ")}`,
           url: shareUrl,
         });
       } catch {
@@ -114,7 +114,7 @@ export default function SajuCardResult({ card }: SajuCardResultProps) {
 
           {/* Keywords */}
           <div className="flex flex-wrap justify-center gap-2">
-            {card.keywords.map((keyword) => (
+            {(card.keywords ?? []).map((keyword) => (
               <span
                 key={keyword}
                 className="px-3 py-1.5 rounded-full text-sm font-medium"

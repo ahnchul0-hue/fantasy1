@@ -1,16 +1,40 @@
-/** App Store and Play Store links
- * TODO: APP_STORE_URL을 실제 App Store ID로 교체 필요 */
-export const APP_STORE_URL = "https://apps.apple.com/app/saju/id0000000000";
-export const PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=app.saju";
+/** App Store and Play Store links */
+export const APP_STORE_URL = process.env.NEXT_PUBLIC_APP_STORE_URL || "";
+export const PLAY_STORE_URL = process.env.NEXT_PUBLIC_PLAY_STORE_URL || "";
 
-/** Site URL */
-export const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || "https://saju.app";
+/**
+ * Resolve an env var with a localhost fallback.
+ * In production, missing env vars log a warning — the localhost fallback
+ * will visibly fail, making misconfiguration obvious.
+ */
+const requiredInProd = (key: string, fallback: string): string => {
+  const value = process.env[key];
+  if (!value) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn(`[config] Missing env var: ${key}, using fallback`);
+    }
+    return fallback;
+  }
+  return value;
+};
 
-/** API URL */
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "https://api.saju.app/v1";
+/** Site URL — defaults to localhost so production must set NEXT_PUBLIC_SITE_URL */
+export const SITE_URL = requiredInProd(
+  "NEXT_PUBLIC_SITE_URL",
+  "http://localhost:3000"
+);
+
+/** Public-facing API URL (used by browser-side code) */
+export const API_URL = requiredInProd(
+  "NEXT_PUBLIC_API_URL",
+  "http://localhost:8080/v1"
+);
+
+/** Backend URL for server-side proxy routes (not exposed to browser) */
+export const BACKEND_URL = requiredInProd(
+  "BACKEND_URL",
+  "http://localhost:8080/v1"
+);
 
 /** 12 시진 (birth hours) with Korean labels */
 export const BIRTH_HOURS = [

@@ -9,6 +9,27 @@ pub struct ClaudeMessage {
     pub content: String,
 }
 
+/// Token usage info returned by LLM providers.
+#[derive(Debug, Clone, Default)]
+pub struct LlmUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+impl LlmUsage {
+    /// Cost in microdollars (Sonnet pricing: $15/M input, $75/M output).
+    pub fn cost_microdollars(&self) -> i64 {
+        (self.input_tokens as i64) * 15 + (self.output_tokens as i64) * 75
+    }
+}
+
+/// Response from LLM provider including text and usage.
+#[derive(Debug, Clone)]
+pub struct LlmResponse {
+    pub text: String,
+    pub usage: Option<LlmUsage>,
+}
+
 /// Abstraction trait for LLM providers (allows Claude -> GPT-4o fallback)
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
@@ -17,7 +38,7 @@ pub trait LlmProvider: Send + Sync {
         system: &str,
         messages: &[ClaudeMessage],
         max_tokens: u32,
-    ) -> Result<String, AppError>;
+    ) -> Result<LlmResponse, AppError>;
 }
 
 /// Claude API client
@@ -98,7 +119,7 @@ impl LlmProvider for ClaudeClient {
         system: &str,
         messages: &[ClaudeMessage],
         max_tokens: u32,
-    ) -> Result<String, AppError> {
+    ) -> Result<LlmResponse, AppError> {
         let api_messages: Vec<ClaudeApiMessage> = messages
             .iter()
             .map(|m| ClaudeApiMessage {
@@ -148,16 +169,20 @@ impl LlmProvider for ClaudeClient {
             .map_err(|e| AppError::ExternalService(format!("Claude response parse error: {}", e)))?;
 
         // Log usage for cost tracking
-        if let Some(usage) = &claude_resp.usage {
-            let input_cost = usage.input_tokens as f64 * 15.0 / 1_000_000.0;
-            let output_cost = usage.output_tokens as f64 * 75.0 / 1_000_000.0;
+        let llm_usage = claude_resp.usage.as_ref().map(|u| {
+            let input_cost = u.input_tokens as f64 * 15.0 / 1_000_000.0;
+            let output_cost = u.output_tokens as f64 * 75.0 / 1_000_000.0;
             tracing::info!(
-                input_tokens = usage.input_tokens,
-                output_tokens = usage.output_tokens,
+                input_tokens = u.input_tokens,
+                output_tokens = u.output_tokens,
                 estimated_cost_usd = input_cost + output_cost,
                 "Claude API usage"
             );
-        }
+            LlmUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+            }
+        });
 
         // Extract text from response
         let text = claude_resp
@@ -174,18 +199,29 @@ impl LlmProvider for ClaudeClient {
             ));
         }
 
-        Ok(text)
+        Ok(LlmResponse { text, usage: llm_usage })
     }
 }
 
 impl ClaudeClient {
-    /// Convenience method that delegates to the trait
+    /// Convenience method that delegates to the trait, returning just the text.
     pub async fn send_message(
         &self,
         system: &str,
         messages: &[ClaudeMessage],
         max_tokens: u32,
     ) -> Result<String, AppError> {
+        let resp = <Self as LlmProvider>::send_message(self, system, messages, max_tokens).await?;
+        Ok(resp.text)
+    }
+
+    /// Send message and return both text and usage info.
+    pub async fn send_message_with_usage(
+        &self,
+        system: &str,
+        messages: &[ClaudeMessage],
+        max_tokens: u32,
+    ) -> Result<LlmResponse, AppError> {
         <Self as LlmProvider>::send_message(self, system, messages, max_tokens).await
     }
 }
