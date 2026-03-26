@@ -23,6 +23,10 @@ class ChatMessagesNotifier
   Object? _lastSendError;
   Object? get lastSendError => _lastSendError;
 
+  /// 전송 중 여부 — 중복 전송 방지
+  bool _isSending = false;
+  bool get isSending => _isSending;
+
   /// 에러 확인 후 클리어
   void clearSendError() => _lastSendError = null;
 
@@ -46,6 +50,9 @@ class ChatMessagesNotifier
 
   Future<void> sendMessage(String content) async {
     if (content.trim().isEmpty) return;
+    if (_isSending) return; // 중복 전송 방지
+    _isSending = true;
+    _lastSendError = null;
 
     final currentMessages = state.valueOrNull ?? [];
     // Optimistic update — add user message immediately
@@ -71,10 +78,10 @@ class ChatMessagesNotifier
       await _loadMessages();
     } catch (e, st) {
       // Revert optimistic update — 메시지 목록은 복원하되 에러도 함께 표시
-      // state를 error로 바꾸면 전체 채팅 UI가 사라지므로, 메시지는 유지하고
-      // 마지막 메시지에 에러 표시를 위해 sendError를 별도 상태로 노출
       state = AsyncValue.data(currentMessages);
       _lastSendError = e;
+    } finally {
+      _isSending = false;
     }
   }
 }
@@ -83,5 +90,5 @@ class ChatMessagesNotifier
 final consultationSessionProvider = FutureProvider.autoDispose
     .family<Consultation?, String>((ref, consultationId) async {
   final apiClient = ref.watch(apiClientProvider);
-  return await apiClient.getConsultation(consultationId);
+  return await apiClient.getConsultationStatus(consultationId);
 });

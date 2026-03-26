@@ -7,10 +7,14 @@ import '../api/api_client.dart';
 /// Auth state: null = not logged in, AppUser = logged in
 final authStateProvider =
     StateNotifierProvider<AuthStateNotifier, AsyncValue<AppUser?>>((ref) {
-  return AuthStateNotifier(
+  final notifier = AuthStateNotifier(
     authService: ref.watch(authServiceProvider),
     apiClient: ref.watch(apiClientProvider),
   );
+  // AuthInterceptor에 토큰 refresh 실패 콜백 연결
+  ref.watch(authInterceptorProvider).onTokenRefreshFailed =
+      notifier.onTokenRefreshFailed;
+  return notifier;
 });
 
 class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
@@ -74,6 +78,15 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
       await Purchases.logOut();
     } catch (_) {}
     state = const AsyncValue.data(null);
+  }
+
+  /// 프로필 생성/업데이트 후 hasProfile 플래그 갱신
+  Future<void> refreshUserProfile() async {
+    final currentUser = state.valueOrNull;
+    if (currentUser == null) return;
+    final updated = currentUser.copyWith(hasProfile: true);
+    await _authService.saveUser(updated);
+    state = AsyncValue.data(updated);
   }
 
   /// 토큰 refresh 실패 시 호출 — authState와 secure storage 동기화

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' as kakao;
 
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
@@ -12,6 +13,14 @@ void main() async {
 
   // Firebase 초기화
   await Firebase.initializeApp();
+
+  // Kakao SDK 초기화
+  kakao.KakaoSdk.init(
+    nativeAppKey: const String.fromEnvironment(
+      'KAKAO_NATIVE_APP_KEY',
+      defaultValue: '',
+    ),
+  );
 
   // Lock to portrait orientation
   await SystemChrome.setPreferredOrientations([

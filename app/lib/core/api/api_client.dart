@@ -42,20 +42,20 @@ abstract class ApiClient {
   @POST('/saju/consultation')
   Future<Consultation> startConsultation(@Body() Map<String, dynamic> body);
 
-  @GET('/saju/consultation/{id}')
-  Future<Consultation> getConsultation(@Path('id') String id);
+  @GET('/saju/consultation/{id}/status')
+  Future<Consultation> getConsultationStatus(@Path('id') String id);
 
   @GET('/saju/consultation/{id}/messages')
   Future<List<ChatMessage>> getConsultationMessages(@Path('id') String id);
-
-  @GET('/consultations')
-  Future<List<Consultation>> getConsultations();
 
   @POST('/saju/consultation/{id}/chat')
   Future<ChatMessage> sendChatMessage(
     @Path('id') String consultationId,
     @Body() Map<String, dynamic> body,
   );
+
+  @GET('/saju/consultations')
+  Future<List<Consultation>> getConsultations();
 
   // --- Compatibility ---
 
@@ -80,6 +80,9 @@ abstract class ApiClient {
       @Body() PaymentVerificationRequest request);
 }
 
+/// Callback for token refresh failure — allows AuthInterceptor to notify auth state
+typedef OnTokenRefreshFailed = Future<void> Function();
+
 /// Interceptor that attaches JWT and handles 401 refresh with mutex
 class AuthInterceptor extends Interceptor {
   final AuthService _authService;
@@ -87,6 +90,7 @@ class AuthInterceptor extends Interceptor {
   bool _isRefreshing = false;
   final _pendingRequests =
       <({RequestOptions options, ErrorInterceptorHandler handler})>[];
+  OnTokenRefreshFailed? onTokenRefreshFailed;
 
   AuthInterceptor(this._authService, this._dio);
 
@@ -118,6 +122,7 @@ class AuthInterceptor extends Interceptor {
       final refreshToken = await _authService.getRefreshToken();
       if (refreshToken == null) {
         await _authService.clearTokens();
+        await onTokenRefreshFailed?.call();
         return handler.next(err);
       }
 
@@ -154,6 +159,7 @@ class AuthInterceptor extends Interceptor {
       }
     } catch (_) {
       await _authService.clearTokens();
+      await onTokenRefreshFailed?.call();
       handler.next(err);
       for (final pending in _pendingRequests) {
         pending.handler.next(err);
@@ -188,8 +194,8 @@ class DeviceIdInterceptor extends Interceptor {
   }
 }
 
-/// Configured Dio instance
-Dio _createDio(AuthService authService) {
+/// Configured Dio instance — returns both Dio and AuthInterceptor for callback wiring
+({Dio dio, AuthInterceptor authInterceptor}) _createDio(AuthService authService) {
   final dio = Dio(BaseOptions(
     baseUrl: _baseUrl,
     connectTimeout: const Duration(seconds: 10),
@@ -200,13 +206,23 @@ Dio _createDio(AuthService authService) {
     },
   ));
   dio.interceptors.add(DeviceIdInterceptor());
-  dio.interceptors.add(AuthInterceptor(authService, dio));
-  return dio;
+  final authInterceptor = AuthInterceptor(authService, dio);
+  dio.interceptors.add(authInterceptor);
+  return (dio: dio, authInterceptor: authInterceptor);
 }
+
+/// AuthInterceptor 인스턴스를 노출하여 auth_providers에서 콜백 연결 가능
+final authInterceptorProvider = Provider<AuthInterceptor>((ref) {
+  return ref.watch(_dioBundle).authInterceptor;
+});
+
+final _dioBundle = Provider<({Dio dio, AuthInterceptor authInterceptor})>((ref) {
+  final authService = ref.watch(authServiceProvider);
+  return _createDio(authService);
+});
 
 /// Riverpod provider for ApiClient
 final apiClientProvider = Provider<ApiClient>((ref) {
-  final authService = ref.watch(authServiceProvider);
-  final dio = _createDio(authService);
-  return ApiClient(dio);
+  final bundle = ref.watch(_dioBundle);
+  return ApiClient(bundle.dio);
 });

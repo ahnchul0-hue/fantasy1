@@ -224,8 +224,15 @@ class _BirthInputScreenState extends ConsumerState<BirthInputScreen> {
   /// 날짜 유효성 검사
   String? _validateDate(DateTime date) {
     final currentYear = DateTime.now().year;
-    if (date.year < 1920 || date.year > currentYear) {
-      return '1920년부터 ${currentYear}년까지 입력 가능합니다';
+    if (_calendarType == CalendarType.lunar) {
+      // 백엔드 음력 변환 테이블 범위: 1920~2030
+      if (date.year < 1920 || date.year > 2030) {
+        return '음력은 1920년부터 2030년까지 입력 가능합니다';
+      }
+    } else {
+      if (date.year < 1920 || date.year > currentYear) {
+        return '1920년부터 ${currentYear}년까지 입력 가능합니다';
+      }
     }
     return null;
   }

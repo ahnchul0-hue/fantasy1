@@ -221,7 +221,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget _buildInputArea(int turnsRemaining) {
     final messagesAsync =
         ref.watch(chatMessagesProvider(widget.consultationId));
-    final isSending = messagesAsync is AsyncLoading;
+    final notifier =
+        ref.read(chatMessagesProvider(widget.consultationId).notifier);
+    final isSending = notifier.isSending;
+
+    // 전송 에러가 있으면 스낵바 표시
+    final sendError = notifier.lastSendError;
+    if (sendError != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('메시지 전송 실패. 다시 시도해주세요.')),
+          );
+          notifier.clearSendError();
+        }
+      });
+    }
 
     return Container(
       padding: EdgeInsets.only(

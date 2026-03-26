@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .unwrap_or(20);
 
-    let db = PgPoolOptions::new()
+    let db: sqlx::PgPool = PgPoolOptions::new()
         .max_connections(max_connections)
         .connect(&database_url)
         .await
@@ -245,6 +245,11 @@ fn api_routes(state: AppState) -> Router<AppState> {
             "/saju/consultation/{id}/chat",
             post(api::saju::send_chat_message),
         )
+        .route(
+            "/saju/consultation/{id}/messages",
+            get(api::saju::get_chat_messages),
+        )
+        .route("/saju/consultations", get(api::saju::list_consultations))
         .route("/fortune/daily", get(api::fortune::get_daily_fortune))
         .route("/profile", get(api::profile::get_profile))
         .route("/payment/verify", post(api::payment::verify_payment))

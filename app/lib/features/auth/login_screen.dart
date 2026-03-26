@@ -73,15 +73,17 @@ class LoginScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: AppSpacing.sm),
 
-                // Apple login
-                _LoginButton(
-                  label: 'Apple로 시작하기',
-                  backgroundColor: AppColors.primary,
-                  textColor: AppColors.surface,
-                  icon: Icons.apple,
-                  onPressed: () => _handleLogin(ref, 'apple'),
-                ),
-                const SizedBox(height: AppSpacing.sm),
+                // Apple login (iOS only)
+                if (Platform.isIOS) ...[
+                  _LoginButton(
+                    label: 'Apple로 시작하기',
+                    backgroundColor: AppColors.primary,
+                    textColor: AppColors.surface,
+                    icon: Icons.apple,
+                    onPressed: () => _handleLogin(ref, 'apple'),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
 
                 // Google login
                 _LoginButton(
@@ -181,6 +183,10 @@ class LoginScreen extends ConsumerWidget {
       final account = await googleSignIn.signIn();
       if (account == null) return null;
       final auth = await account.authentication;
+      if (auth.idToken == null) {
+        debugPrint('Google login: idToken is null');
+        return null;
+      }
       return auth.idToken;
     } catch (e) {
       debugPrint('Google login error: $e');

@@ -17,13 +17,13 @@ class ConsultationNotifier extends StateNotifier<AsyncValue<Consultation?>> {
 
   Future<void> startConsultation({
     required BirthInput birthInput,
-    required String orderId,
+    required String receiptId,
   }) async {
     state = const AsyncValue.loading();
     try {
       final consultation = await _apiClient.startConsultation({
         'birth_input': birthInput.toJson(),
-        'order_id': orderId,
+        'receipt_id': receiptId,
       });
       state = AsyncValue.data(consultation);
     } catch (e, st) {
@@ -48,13 +48,13 @@ class ConsultationCreationNotifier extends StateNotifier<AsyncValue<Consultation
   /// 결제 완료 후 상담 생성. 성공 시 consultation ID 반환.
   Future<String?> startConsultation({
     required BirthInput birthInput,
-    required String orderId,
+    required String receiptId,
   }) async {
     state = const AsyncValue.loading();
     try {
       final consultation = await _apiClient.startConsultation({
         'birth_input': birthInput.toJson(),
-        'order_id': orderId,
+        'receipt_id': receiptId,
       });
       state = AsyncValue.data(consultation);
       return consultation.id;
@@ -65,8 +65,8 @@ class ConsultationCreationNotifier extends StateNotifier<AsyncValue<Consultation
   }
 }
 
-/// Consultation status polling — 서버에서 현재 상담 전체 데이터 조회
+/// Consultation status polling — getConsultationStatus 사용 (백엔드: /saju/consultation/{id}/status)
 final consultationStatusProvider = FutureProvider.autoDispose.family<Consultation, String>((ref, id) async {
   final apiClient = ref.watch(apiClientProvider);
-  return await apiClient.getConsultation(id);
+  return await apiClient.getConsultationStatus(id);
 });

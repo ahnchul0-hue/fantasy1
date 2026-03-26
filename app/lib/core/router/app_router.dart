@@ -19,14 +19,13 @@ import '../../shared/models/birth_input.dart';
 import '../providers/auth_providers.dart';
 import '../shell/app_shell.dart';
 
-// 인증 필수 경로
+// 인증 필수 경로 (prefix match — /consultation/:id/result 등도 포함)
 const _protectedRoutes = {
   '/profile',
   '/history',
   '/settings',
-  '/consultation/preview',
+  '/consultation',
   '/fortune',
-  '/settings/delete-account',
 };
 
 // 인증 불필요 경로
@@ -49,8 +48,12 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/home',
     redirect: (context, state) {
+      final isLoading = authState.isLoading;
       final isLoggedIn = authState.valueOrNull != null;
       final currentPath = state.matchedLocation;
+
+      // 인증 상태 로딩 중 → redirect 하지 않음 (딥링크 보존)
+      if (isLoading) return null;
 
       // 인증 필수 경로에 비로그인 사용자 → 로그인 페이지
       if (!isLoggedIn && _protectedRoutes.any((r) => currentPath.startsWith(r))) {
@@ -62,7 +65,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/home';
       }
 
-      return null; // redirect 없음
+      return null;
     },
     routes: [
       // Bottom nav shell — StatefulShellRoute로 탭별 상태 보존

@@ -226,9 +226,10 @@ pub async fn create_consultation(
         AppError::PaymentRequired("Valid payment not found for this receipt".to_string())
     })?;
 
-    // Verify the order's product_id is a consultation product (prevents using
-    // cheaper compatibility purchases to unlock full consultations)
-    if !order.product_id.starts_with("saju_consultation_") {
+    // Verify the order's product_id is a consultation product
+    if !order.product_id.starts_with("saju_consultation_")
+        && !order.product_id.starts_with("compatibility_consultation_")
+    {
         return Err(AppError::BadRequest(
             "Invalid product for consultation".to_string(),
         ));
@@ -319,12 +320,13 @@ pub async fn create_consultation(
             "saju_consultation"
         };
 
-        sqlx::query(
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO consultations
                 (id, user_id, order_id, consultation_type, birth_data_enc, four_pillars, analysis_data,
                  status, checkpoint_status, expires_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, 'generating', 'none', $8)
+            ON CONFLICT (order_id) DO NOTHING
             "#,
         )
         .bind(consultation_id)
@@ -337,6 +339,21 @@ pub async fn create_consultation(
         .bind(expires_at)
         .execute(&state.db)
         .await?;
+
+        // Concurrent retry hit the unique constraint — return the existing consultation
+        if insert_result.rows_affected() == 0 {
+            let existing = sqlx::query_as::<_, ConsultationRow>(
+                r#"SELECT id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
+                       status::text as status, checkpoint_status::text as checkpoint_status,
+                       analysis_summary, result_images, chat_turns_remaining, chat_turns_used,
+                       chat_context, expires_at, created_at, updated_at
+                FROM consultations WHERE order_id = $1"#,
+            )
+            .bind(order.id)
+            .fetch_one(&state.db)
+            .await?;
+            return Ok(Json(existing.to_response()));
+        }
     }
 
     // Save/update user's saju profile (after consultation INSERT succeeds)
@@ -346,87 +363,91 @@ pub async fn create_consultation(
         tracing::warn!("Failed to update profile for user {}: {}", auth.user_id, e);
     }
 
-    // Step 5: Generate L3 interpretation (Claude API)
-    // This is async but we do it inline for the initial response
-    let interpretation = match state.saju_interpreter.generate_interpretation(&analysis).await {
-        Ok(text) => {
-            // Checkpoint: analysis_done
-            sqlx::query(
-                "UPDATE consultations SET analysis_summary = $1, checkpoint_status = 'analysis_done' WHERE id = $2",
-            )
-            .bind(&text)
-            .bind(consultation_id)
-            .execute(&state.db)
-            .await?;
-            Some(text)
-        }
-        Err(e) => {
-            tracing::error!("L3 interpretation failed: {}", e);
-            // Mark as failed but keep L1+L2 data
-            sqlx::query(
-                "UPDATE consultations SET status = 'failed' WHERE id = $1",
-            )
-            .bind(consultation_id)
-            .execute(&state.db)
-            .await?;
-            None
-        }
-    };
-
-    // Step 6: Generate images via NanoBanana (sections)
-    let sections = ["성격", "연애운", "재물운", "커리어", "조언"];
-    let ilju_name = four_pillars.ilju_name();
-    let element = &analysis.lucky_element;
-    let mut image_urls = Vec::new();
-
-    for section in &sections {
-        match state
-            .nanobanana
-            .generate_result_image(section, &ilju_name, element, "")
-            .await
-        {
-            Ok(url) => image_urls.push(url),
-            Err(e) => {
-                tracing::warn!("Image generation failed for section {}: {}", section, e);
-                // Continue with other sections - partial success is acceptable
+    // Steps 5+6: Generate L3 interpretation and images in a background task.
+    // Return immediately with 'generating' status — client polls via /status endpoint.
+    let bg_state = state.clone();
+    let bg_analysis = analysis.clone();
+    let bg_four_pillars = four_pillars.clone();
+    tokio::spawn(async move {
+        // Step 5: L3 interpretation (Claude API)
+        let interpretation = match bg_state.saju_interpreter.generate_interpretation(&bg_analysis).await {
+            Ok(text) => {
+                let _ = sqlx::query(
+                    "UPDATE consultations SET analysis_summary = $1, checkpoint_status = 'analysis_done' WHERE id = $2",
+                )
+                .bind(&text)
+                .bind(consultation_id)
+                .execute(&bg_state.db)
+                .await;
+                Some(text)
             }
-        }
-    }
+            Err(e) => {
+                tracing::error!("L3 interpretation failed for consultation {}: {}", consultation_id, e);
+                let _ = sqlx::query(
+                    "UPDATE consultations SET status = 'failed' WHERE id = $1",
+                )
+                .bind(consultation_id)
+                .execute(&bg_state.db)
+                .await;
+                return;
+            }
+        };
 
-    // Checkpoint: images_done
-    let images_json = serde_json::to_value(&image_urls).unwrap_or_default();
-    let final_status = if interpretation.is_some() { "ready" } else { "failed" };
-    let final_checkpoint = if !image_urls.is_empty() && interpretation.is_some() {
-        "complete"
-    } else if interpretation.is_some() {
-        "analysis_done"
-    } else {
-        "none"
-    };
+        // Step 6: Generate images via NanoBanana (sections) — concurrently
+        let sections = ["성격", "연애운", "재물운", "커리어", "조언"];
+        let ilju_name = bg_four_pillars.ilju_name();
+        let element = &bg_analysis.lucky_element;
 
-    sqlx::query(
-        r#"
-        UPDATE consultations
-        SET result_images = $1, status = $2, checkpoint_status = $3
-        WHERE id = $4
-        "#,
-    )
-    .bind(&images_json)
-    .bind(final_status)
-    .bind(final_checkpoint)
-    .bind(consultation_id)
-    .execute(&state.db)
-    .await?;
+        let image_futures: Vec<_> = sections.iter().map(|section| {
+            let s = bg_state.clone();
+            let name = ilju_name.clone();
+            let elem = element.clone();
+            let sec = section.to_string();
+            async move {
+                match s.nanobanana.generate_result_image(&sec, &name, &elem, "").await {
+                    Ok(url) => Some(url),
+                    Err(e) => {
+                        tracing::warn!("Image generation failed for section {}: {}", sec, e);
+                        None
+                    }
+                }
+            }
+        }).collect();
 
-    // Return response
+        let image_results = futures::future::join_all(image_futures).await;
+        let image_urls: Vec<String> = image_results.into_iter().flatten().collect();
+
+        // Final status update
+        let images_json = serde_json::to_value(&image_urls).unwrap_or_default();
+        let final_status = if interpretation.is_some() { "ready" } else { "failed" };
+        let final_checkpoint = if !image_urls.is_empty() && interpretation.is_some() {
+            "complete"
+        } else if interpretation.is_some() {
+            "analysis_done"
+        } else {
+            "none"
+        };
+
+        let _ = sqlx::query(
+            "UPDATE consultations SET result_images = $1, status = $2, checkpoint_status = $3 WHERE id = $4",
+        )
+        .bind(&images_json)
+        .bind(final_status)
+        .bind(final_checkpoint)
+        .bind(consultation_id)
+        .execute(&bg_state.db)
+        .await;
+    });
+
+    // Return immediately — client polls /consultation/{id}/status
     Ok(Json(ConsultationResponse {
         id: consultation_id,
-        status: final_status.to_string(),
-        result_images: image_urls,
-        analysis_summary: interpretation,
+        status: "generating".to_string(),
+        result_images: vec![],
+        analysis_summary: None,
         chat_turns_remaining: 50,
         expires_at,
-        checkpoint_status: final_checkpoint.to_string(),
+        checkpoint_status: "none".to_string(),
     }))
 }
 
@@ -485,7 +506,7 @@ pub async fn send_chat_message(
         .await?;
 
     // Execute the inner logic and always release the lock afterwards
-    let result = send_chat_message_inner(&state, auth.user_id, consultation_id, &req).await;
+    let result = send_chat_message_inner(&state, auth.user_id, consultation_id, &req, &lock_token).await;
 
     // Release lock atomically (only if we still hold it)
     let _ = state
@@ -502,6 +523,7 @@ async fn send_chat_message_inner(
     user_id: Uuid,
     consultation_id: Uuid,
     req: &ChatRequest,
+    lock_token: &str,
 ) -> Result<Json<ChatMessageResponse>, AppError> {
     // Fetch consultation
     let consultation = sqlx::query_as::<_, ConsultationRow>(
@@ -589,17 +611,37 @@ async fn send_chat_message_inner(
         .as_deref()
         .unwrap_or("사주 분석 데이터 없음");
 
+    // Extend lock periodically while Claude is processing (lock TTL=120s, Claude timeout=120s)
+    let lock_extender = {
+        let cache = state.cache.clone();
+        let cid = consultation_id.to_string();
+        let token = lock_token.to_owned();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                match cache.extend_session_lock(&cid, &token).await {
+                    Ok(true) => tracing::debug!("Session lock extended for {}", cid),
+                    _ => break, // Lock lost or error — stop extending
+                }
+            }
+        })
+    };
+
     // Generate AI response (no user message committed yet — avoids dangling messages on failure)
-    let ai_response = match state
+    let llm_response = state
         .saju_interpreter
-        .generate_chat_response(
+        .generate_chat_response_with_usage(
             analysis_summary,
             &chat_history,
             &req.message,
             consultation.chat_turns_remaining,
         )
-        .await
-    {
+        .await;
+
+    // Stop the lock extender
+    lock_extender.abort();
+
+    let llm_response = match llm_response {
         Ok(response) => response,
         Err(e) => {
             tracing::error!("Claude chat response failed for consultation {}: {}", consultation_id, e);
@@ -608,6 +650,8 @@ async fn send_chat_message_inner(
             ));
         }
     };
+    let ai_response = llm_response.text;
+    let cost_microdollars = llm_response.usage.as_ref().map(|u| u.cost_microdollars()).unwrap_or(0);
 
     // Use a transaction to commit user message, AI message, and turn update atomically
     let mut tx = state.db.begin().await?;
@@ -627,11 +671,12 @@ async fn send_chat_message_inner(
     let now = Utc::now();
     let ai_content_enc = state.crypto.encrypt(&ai_response)?;
     sqlx::query(
-        "INSERT INTO chat_messages (id, consultation_id, role, content_enc, created_at) VALUES ($1, $2, 'assistant', $3, $4)",
+        "INSERT INTO chat_messages (id, consultation_id, role, content_enc, token_count, created_at) VALUES ($1, $2, 'assistant', $3, $4, $5)",
     )
     .bind(ai_msg_id)
     .bind(consultation_id)
     .bind(&ai_content_enc)
+    .bind(cost_microdollars as i32)
     .bind(now)
     .execute(&mut *tx)
     .await?;
@@ -699,6 +744,50 @@ pub async fn compatibility_preview(
 pub struct CompatibilityRequest {
     pub person1: BirthInput,
     pub person2: BirthInput,
+}
+
+/// GET /v1/saju/consultation/{id}/messages — Retrieve chat messages for a consultation
+pub async fn get_chat_messages(
+    State(state): State<AppState>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(consultation_id): Path<Uuid>,
+) -> Result<Json<Vec<ChatMessageResponse>>, AppError> {
+    // Verify ownership
+    let _consultation = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM consultations WHERE id = $1 AND user_id = $2",
+    )
+    .bind(consultation_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Consultation not found".to_string()))?;
+
+    let messages = sqlx::query_as::<_, ChatMessageRow>(
+        "SELECT id, consultation_id, role, content, created_at FROM chat_messages WHERE consultation_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(consultation_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(messages.into_iter().map(|m| m.to_response()).collect()))
+}
+
+/// GET /v1/saju/consultations — List all consultations for the authenticated user
+pub async fn list_consultations(
+    State(state): State<AppState>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+) -> Result<Json<Vec<ConsultationResponse>>, AppError> {
+    let consultations = sqlx::query_as::<_, ConsultationRow>(
+        r#"SELECT id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
+           consultation_type, status, checkpoint_status, analysis_summary,
+           chat_turns_remaining, expires_at, created_at
+           FROM consultations WHERE user_id = $1 ORDER BY created_at DESC"#,
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(consultations.into_iter().map(|c| c.to_response()).collect()))
 }
 
 /// Generate a short random ID for share links
