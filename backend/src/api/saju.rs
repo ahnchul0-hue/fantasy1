@@ -763,13 +763,27 @@ pub async fn get_chat_messages(
     .ok_or_else(|| AppError::NotFound("Consultation not found".to_string()))?;
 
     let messages = sqlx::query_as::<_, ChatMessageRow>(
-        "SELECT id, consultation_id, role, content, created_at FROM chat_messages WHERE consultation_id = $1 ORDER BY created_at ASC",
+        "SELECT id, consultation_id, role::text as role, content_enc, token_count, created_at FROM chat_messages WHERE consultation_id = $1 ORDER BY created_at ASC",
     )
     .bind(consultation_id)
     .fetch_all(&state.db)
     .await?;
 
-    Ok(Json(messages.into_iter().map(|m| m.to_response()).collect()))
+    let responses: Vec<ChatMessageResponse> = messages
+        .iter()
+        .filter_map(|m| {
+            let content = state.crypto.decrypt(&m.content_enc).ok()?;
+            Some(ChatMessageResponse {
+                id: m.id,
+                role: m.role.clone(),
+                content,
+                turns_remaining: 0,
+                created_at: m.created_at,
+            })
+        })
+        .collect();
+
+    Ok(Json(responses))
 }
 
 /// GET /v1/saju/consultations — List all consultations for the authenticated user
@@ -779,8 +793,9 @@ pub async fn list_consultations(
 ) -> Result<Json<Vec<ConsultationResponse>>, AppError> {
     let consultations = sqlx::query_as::<_, ConsultationRow>(
         r#"SELECT id, user_id, order_id, birth_data_enc, four_pillars, analysis_data,
-           consultation_type, status, checkpoint_status, analysis_summary,
-           chat_turns_remaining, expires_at, created_at
+               status::text as status, checkpoint_status::text as checkpoint_status,
+               analysis_summary, result_images, chat_turns_remaining, chat_turns_used,
+               chat_context, expires_at, created_at, updated_at
            FROM consultations WHERE user_id = $1 ORDER BY created_at DESC"#,
     )
     .bind(auth.user_id)

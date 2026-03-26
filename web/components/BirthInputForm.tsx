@@ -22,14 +22,16 @@ export default function BirthInputForm({
   const [gender, setGender] = useState<"male" | "female" | "">("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const maxBirthYear = new Date().getFullYear() - 14;
+
   const validate = useCallback((): boolean => {
     const newErrors: Record<string, string> = {};
     const y = parseInt(year);
     const m = parseInt(month);
     const d = parseInt(day);
 
-    if (!year || isNaN(y) || y < 1900 || y > 2100) {
-      newErrors.year = "올바른 연도를 입력해주세요 (1900~2100)";
+    if (!year || isNaN(y) || y < 1940 || y > maxBirthYear) {
+      newErrors.year = `올바른 연도를 입력해주세요 (1940~${maxBirthYear}, 만 14세 이상)`;
     }
     if (!month || isNaN(m) || m < 1 || m > 12) {
       newErrors.month = "올바른 월을 입력해주세요 (1~12)";
@@ -51,7 +53,7 @@ export default function BirthInputForm({
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [year, month, day, gender]);
+  }, [year, month, day, gender, maxBirthYear]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,8 +118,8 @@ export default function BirthInputForm({
               value={year}
               onChange={(e) => setYear(e.target.value)}
               className="input-field text-center"
-              min={1900}
-              max={2100}
+              min={1940}
+              max={maxBirthYear}
               inputMode="numeric"
               aria-describedby={errors.year ? "error-year" : undefined}
               aria-invalid={!!errors.year}
@@ -220,9 +222,9 @@ export default function BirthInputForm({
                 (e.currentTarget.nextElementSibling as HTMLElement)?.focus();
               }
             }}
-            className={`flex-1 h-12 rounded-button border text-sm font-medium transition-all duration-300 ${
+            className={`flex-1 h-12 rounded-button border-2 text-sm font-semibold transition-all duration-300 ${
               gender === "male"
-                ? "border-accent bg-accent/10 text-accent"
+                ? "border-accent bg-accent/20 text-accent shadow-sm"
                 : "border-divider text-secondary-text hover:border-accent/50"
             }`}
           >
@@ -241,9 +243,9 @@ export default function BirthInputForm({
                 (e.currentTarget.previousElementSibling as HTMLElement)?.focus();
               }
             }}
-            className={`flex-1 h-12 rounded-button border text-sm font-medium transition-all duration-300 ${
+            className={`flex-1 h-12 rounded-button border-2 text-sm font-semibold transition-all duration-300 ${
               gender === "female"
-                ? "border-accent bg-accent/10 text-accent"
+                ? "border-accent bg-accent/20 text-accent shadow-sm"
                 : "border-divider text-secondary-text hover:border-accent/50"
             }`}
           >

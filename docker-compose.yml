@@ -58,6 +58,7 @@ services:
       PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       HMAC_SECRET: ${HMAC_SECRET:-local_dev_hmac_secret_minimum_32_characters}
       CLAUDE_API_KEY: ${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY}}
+      FREE_CARD_DAILY_LIMIT: "100"
     depends_on:
       postgres:
         condition: service_healthy

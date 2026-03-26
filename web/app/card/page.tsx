@@ -20,14 +20,13 @@ export default function CardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      if (!res.ok) throw new Error("Failed to generate saju card");
-      const result: SajuCard = await res.json();
-      setCard(result);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "사주 카드 생성에 실패했습니다");
+      setCard(data as SajuCard);
     } catch (err) {
       console.error("Failed to create saju card:", err);
-      setError(
-        "사주 카드 생성에 실패했습니다. 잠시 후 다시 시도해주세요."
-      );
+      const msg = err instanceof Error ? err.message : "알 수 없는 오류";
+      setError(msg);
     } finally {
       setIsLoading(false);
     }

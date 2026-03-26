@@ -34,13 +34,15 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              // JSON-LD (<script type="application/ld+json">) is a data block per the HTML spec
-              // and is NOT subject to CSP script-src. No 'unsafe-inline' needed for JSON-LD.
-              "script-src 'self' 'strict-dynamic' https://www.googletagmanager.com",
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "font-src 'self' https://fonts.gstatic.com",
+              // 'unsafe-inline' needed for Next.js inline scripts (hydration, HMR in dev)
+              // 'unsafe-eval' needed for Next.js dev mode (webpack HMR)
+              process.env.NODE_ENV === "development"
+                ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+                : "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
+              "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
               "img-src 'self' data: https://cdn.saju.app https://api.saju.app",
-              "connect-src 'self' https://api.saju.app",
+              "connect-src 'self' https://api.saju.app http://localhost:8080",
             ].join("; "),
           },
         ],

@@ -124,12 +124,15 @@ pub static LUNAR_YEARS: [LunarYearData; 11] = [
     },
 ];
 
-/// Get lunar year data for a given Gregorian year (2020-2030).
+/// Get lunar year data for a given Gregorian year (1940-2030).
 pub fn get_lunar_year(year: u16) -> Option<&'static LunarYearData> {
-    if year < 2020 || year > 2030 {
-        return None;
+    if year >= 2020 && year <= 2030 {
+        Some(&LUNAR_YEARS[(year - 2020) as usize])
+    } else if year >= 1940 && year <= 2019 {
+        Some(&super::lunar_data_1940_2019::LUNAR_YEARS_1940_2019[(year - 1940) as usize])
+    } else {
+        None
     }
-    Some(&LUNAR_YEARS[(year - 2020) as usize])
 }
 
 /// Get the number of days in a specific lunar month.
@@ -172,7 +175,7 @@ pub fn solar_to_lunar(year: u16, month: u8, day: u8) -> Option<(u16, u8, u8, boo
         let (ny_m, ny_d) = data.new_year_solar;
         if (month, day) >= (ny_m, ny_d) {
             year
-        } else if year > 2020 {
+        } else if year > 1940 {
             year - 1
         } else {
             return None; // Before our data range

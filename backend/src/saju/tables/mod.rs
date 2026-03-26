@@ -6,11 +6,12 @@
 //! - **Heavenly Stems** (천간/天干): 10 celestial stems with 오행 mapping
 //! - **Earthly Branches** (지지/地支): 12 terrestrial branches with 오행/시진 mapping
 //! - **Solar Terms** (절기/節氣): 24 solar term transition times (2020-2030, with mathematical fallback)
-//! - **Lunar Calendar** (음력): Solar-lunar date conversion tables (2020-2030)
+//! - **Lunar Calendar** (음력): Solar-lunar date conversion tables (1940-2030)
 
 pub mod earthly_branches;
 pub mod heavenly_stems;
 pub mod lunar_calendar;
+pub mod lunar_data_1940_2019;
 pub mod solar_terms;
 
 // Re-export commonly used types and constants
@@ -25,6 +26,7 @@ pub use heavenly_stems::{
 pub use lunar_calendar::{
     get_lunar_year, lunar_to_solar, solar_to_lunar, LunarYearData, LUNAR_YEARS,
 };
+pub use lunar_data_1940_2019::{get_lunar_year_1940_2019, LUNAR_YEARS_1940_2019};
 pub use solar_terms::{find_active_jie_term, jie_term_to_saju_month, JIE_TERMS};
 
 /// Get the 60 甲子 (Sexagenary cycle) index for a given Heavenly Stem and Earthly Branch pair.

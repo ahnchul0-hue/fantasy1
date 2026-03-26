@@ -23,8 +23,9 @@ function validateAndSanitize(
   const birthHour = b.birth_hour;
   const isLeapMonth = Boolean(b.is_leap_month);
 
-  if (!Number.isInteger(year) || year < 1920 || year > new Date().getFullYear()) {
-    return { ok: false, error: "유효하지 않은 연도입니다" };
+  const maxBirthYear = new Date().getFullYear() - 14;
+  if (!Number.isInteger(year) || year < 1940 || year > maxBirthYear) {
+    return { ok: false, error: `유효하지 않은 연도입니다 (1940~${maxBirthYear}년, 만 14세 이상)` };
   }
   if (!Number.isInteger(month) || month < 1 || month > 12) {
     return { ok: false, error: "유효하지 않은 월입니다" };
@@ -108,8 +109,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
+      let errorMsg = "사주 카드 생성에 실패했습니다";
+      try {
+        const errBody = await response.json();
+        if (errBody?.error?.message) errorMsg = errBody.error.message;
+        else if (typeof errBody?.error === "string") errorMsg = errBody.error;
+      } catch { /* use default */ }
       return NextResponse.json(
-        { error: "Failed to generate saju card" },
+        { error: errorMsg },
         { status: response.status }
       );
     }

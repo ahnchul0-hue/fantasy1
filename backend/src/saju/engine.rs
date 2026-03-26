@@ -85,11 +85,11 @@ impl SajuEngine {
                 Ok((input.year, input.month, input.day))
             }
             CalendarType::Lunar => {
-                // 음력 변환 테이블 범위를 먼저 확인 (2020-2030만 지원)
-                if !(2020..=2030).contains(&input.year) {
+                // 음력 변환 테이블 범위 확인 (1940-2030)
+                if !(1940..=2030).contains(&input.year) {
                     return Err(AppError::BadRequest(
                         format!(
-                            "음력 변환은 2020-2030년만 지원합니다. 양력 날짜를 입력해주세요. (입력: {}년)",
+                            "음력 변환은 1940-2030년만 지원합니다. (입력: {}년)",
                             input.year
                         )
                     ));
