@@ -12,6 +12,13 @@ export const metadata: Metadata = {
     url: `${SITE_URL}/terms`,
     type: "website",
     locale: "ko_KR",
+    images: [{ url: `${SITE_URL}/og-default.png`, width: 1200, height: 630, alt: "AI 사주" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "이용약관 | AI 사주",
+    description: "AI 사주 서비스의 이용약관입니다.",
+    images: [`${SITE_URL}/og-default.png`],
   },
 };
 
